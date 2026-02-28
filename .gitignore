@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Model weights (large binary files)
+*.pt
+*.onnx
+*.pth
+
+# Environment secrets
+.env
+
+# Logs and snapshots (runtime output)
+logs/
+snapshots/
+
+# IDE / editor
+.vscode/
+.cursor/
+.idea/
+
+# Test scratch files
+test_*.py
+
+# Node modules (frontend)
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
