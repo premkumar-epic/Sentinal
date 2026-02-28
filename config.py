@@ -51,10 +51,10 @@ class ModelConfig:
         default_factory=lambda: os.getenv("MODEL_NAME", "yolov8n.pt")
     )
     confidence_threshold: float = field(
-        default_factory=lambda: float(os.getenv("MODEL_CONFIDENCE", "0.4"))
+        default_factory=lambda: float(os.getenv("MODEL_CONFIDENCE", "0.35"))
     )
     iou_threshold: float = field(
-        default_factory=lambda: float(os.getenv("MODEL_IOU", "0.45"))
+        default_factory=lambda: float(os.getenv("MODEL_IOU", "0.50"))
     )
     max_det: int = field(
         default_factory=lambda: int(os.getenv("MODEL_MAX_DET", "20"))
@@ -70,6 +70,9 @@ class ModelConfig:
     )
     reid_min_similarity: float = field(
         default_factory=lambda: float(os.getenv("REID_MIN_SIMILARITY", "0.60"))
+    )
+    reid_ema_alpha: float = field(
+        default_factory=lambda: float(os.getenv("REID_EMA_ALPHA", "0.90"))
     )
 
 

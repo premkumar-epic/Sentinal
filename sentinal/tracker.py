@@ -31,6 +31,10 @@ class ObjectTracker:
         self._max_det = max(1, int(getattr(config, "max_det", 20)))
         self._imgsz = int(getattr(config, "imgsz", 640))
 
+        # Auto-detect hardware acceleration
+        import torch
+        self._device_str = "cuda" if torch.cuda.is_available() else "cpu"
+
         # Fuse layers for faster CPU inference when supported.
         try:
             self._model.fuse()
@@ -41,7 +45,7 @@ class ObjectTracker:
         try:
             dummy = np.zeros((360, 640, 3), dtype=np.uint8)
             self._model.track(source=dummy, conf=self._conf, classes=[0],
-                              persist=False, verbose=False, device="cpu")
+                              persist=False, verbose=False, device=self._device_str)
         except Exception:  # noqa: BLE001
             pass
 
@@ -54,7 +58,7 @@ class ObjectTracker:
             classes=[0],  # person
             persist=True,
             verbose=False,
-            device="cpu",
+            device=self._device_str,
             imgsz=self._imgsz,
             max_det=self._max_det,
         )

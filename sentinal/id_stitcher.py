@@ -20,6 +20,7 @@ class StitcherConfig:
     ttl_seconds: float = 8.0
     min_similarity: float = 0.75  # Cosine similarity threshold
     max_lost: int = 50
+    ema_alpha: float = 0.90
 
 
 @dataclass
@@ -197,9 +198,18 @@ class TrackIdStitcher:
     def _upsert_lost(self, stable_id: int, features: np.ndarray, now: float) -> None:
         for lt in self._lost:
             if lt.stable_id == stable_id:
-                lt.features = features
+                alpha = self._cfg.ema_alpha
+                updated_features = alpha * lt.features + (1.0 - alpha) * features
+                norm = np.linalg.norm(updated_features)
+                if norm > 0:
+                    updated_features /= norm
+                lt.features = updated_features
                 lt.last_seen = now
                 return
+
+        norm = np.linalg.norm(features)
+        if norm > 0:
+            features = features / norm
         self._lost.append(_LostTrack(stable_id=stable_id, features=features, last_seen=now))
 
     def _mark_lost(self, stable_id: int, now: float) -> None:
