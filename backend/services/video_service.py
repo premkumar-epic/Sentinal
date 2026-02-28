@@ -1,63 +1,68 @@
+"""
+Shared frame buffer between the SurveillancePipeline and the MJPEG stream endpoint.
+The pipeline writes encoded JPEG bytes here; VideoStreamManager reads from it.
+This eliminates the need for a second pipeline (and a competing camera open).
+"""
+from __future__ import annotations
+
 import threading
 import time
-import cv2
-from typing import Optional, Generator
+from collections import deque
+from typing import Generator, Optional
 
-from config import load_config
-from sentinal.pipeline import SurveillancePipeline
+from sentinal.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
+
+# Module-level shared buffer — pipeline.py writes here
+_shared_frame: deque[bytes] = deque(maxlen=2)
+_shared_lock = threading.Lock()
+_running = False
+
+
+def push_frame(jpeg_bytes: bytes) -> None:
+    """Called by pipeline.py to push the latest encoded frame."""
+    with _shared_lock:
+        _shared_frame.append(jpeg_bytes)
+
 
 class VideoStreamManager:
-    _instance = None
-    
-    def __new__(cls):
+    """Reads from the shared frame buffer and serves MJPEG streams."""
+
+    _instance: Optional["VideoStreamManager"] = None
+
+    def __new__(cls) -> "VideoStreamManager":
         if cls._instance is None:
-            cls._instance = super(VideoStreamManager, cls).__new__(cls)
-            cls._instance.initialized = False
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
-        if self.initialized:
+    def __init__(self) -> None:
+        if self._initialized:
             return
-        self.initialized = True
-        self.config = load_config()
-        self.pipeline = SurveillancePipeline(self.config)
-        self.latest_frame: Optional[bytes] = None
-        self.lock = threading.Lock()
-        self.running = False
-        self.thread = None
+        self._initialized = True
 
-    def start(self):
-        if self.running:
-            return
-        self.running = True
-        self.thread = threading.Thread(target=self._run_pipeline, daemon=True)
-        self.thread.start()
+    def start(self) -> None:
+        global _running
+        _running = True
+        logger.info("VideoStreamManager ready — consuming shared frame buffer.")
 
-    def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=2.0)
-
-    def _run_pipeline(self):
-        for display_frame, tracks, events in self.pipeline.frames():
-            if not self.running:
-                break
-                
-            # Encode frame as JPEG for MJPEG stream
-            ret, buffer = cv2.imencode('.jpg', display_frame)
-            if ret:
-                with self.lock:
-                    self.latest_frame = buffer.tobytes()
-            time.sleep(0.001)
+    def stop(self) -> None:
+        global _running
+        _running = False
 
     def generate_mjpeg(self, camera_id: str) -> Generator[bytes, None, None]:
-        """Yield frames in MJPEG format for the given camera."""
-        while self.running:
-            with self.lock:
-                frame = self.latest_frame
+        """Yield MJPEG frames for the given camera from the shared buffer."""
+        while _running:
+            with _shared_lock:
+                frame = _shared_frame[-1] if _shared_frame else None
+
             if frame:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                )
             time.sleep(0.03)
+
 
 video_manager = VideoStreamManager()

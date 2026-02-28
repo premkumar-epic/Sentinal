@@ -90,6 +90,16 @@ class SurveillancePipeline:
                 smooth_fps = _ALPHA * instant_fps + (1.0 - _ALPHA) * smooth_fps if smooth_fps > 0 else instant_fps
 
                 display_frame = draw_overlays(frame.copy(), tracks, self._zones, fps=smooth_fps)
+
+                # Push encoded frame to shared MJPEG buffer (backend stream)
+                try:
+                    from backend.services.video_service import push_frame
+                    ret, buf = cv2.imencode(".jpg", display_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ret:
+                        push_frame(buf.tobytes())
+                except Exception:  # noqa: BLE001
+                    pass  # Running standalone without backend — skip silently
+
                 yield display_frame, tracks, events
                 frame_index += 1
 

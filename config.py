@@ -100,15 +100,26 @@ class AppConfig:
     zones: List[ZoneConfig] = field(default_factory=list)
 
 
+def _load_zones() -> List[ZoneConfig]:
+    """Load zones from zones.json in the project root, or return the default zone."""
+    import json
+    zones_file = Path(__file__).parent / "zones.json"
+    if zones_file.exists():
+        try:
+            with open(zones_file, encoding="utf-8") as f:
+                data = json.load(f)
+            return [
+                ZoneConfig(id=z["id"], label=z["label"], polygon=[(p[0], p[1]) for p in z["polygon"]])
+                for z in data
+            ]
+        except Exception:
+            pass  # Fall through to default on any parse error
+    # Hardcoded fallback
+    return [
+        ZoneConfig(id="zone_1", label="Entrance", polygon=[(100, 80), (540, 80), (540, 300), (100, 300)])
+    ]
+
+
 def load_config() -> AppConfig:
     """Return configured settings loaded from env vars mapping directly to dataclasses."""
-    
-    # We load zones via env if needed, but for MVP keep it hardcoded, later loaded via JSON/DB.
-    default_zones = [
-        ZoneConfig(
-             id="zone_1",
-             label="Entrance",
-             polygon=[(100, 80), (540, 80), (540, 300), (100, 300)],
-        )
-    ]
-    return AppConfig(zones=default_zones)
+    return AppConfig(zones=_load_zones())

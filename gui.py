@@ -82,11 +82,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _start_pipeline(self) -> None:
         cfg = load_config()
+        # Only override source/path — all other video config (frame_skip, resolution) inherits from .env
         source_type = self._source_combo.currentText()
-        video_cfg = VideoConfig(
-            source_type=source_type, video_path=self._video_path if source_type == "video" else None
-        )
-        cfg.video = video_cfg
+        cfg.video.source_type = source_type
+        cfg.video.video_path = self._video_path if source_type == "video" else None
         pipeline = SurveillancePipeline(cfg)
         self._thread = VideoThread(pipeline)
         self._thread.frame_ready.connect(self._update_frame)

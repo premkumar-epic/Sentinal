@@ -1,24 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fetchEvents } from '../services/api';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { ShieldAlert, Image as ImageIcon } from 'lucide-react';
 
+const WS_URL = 'ws://localhost:8000/ws/events';
+const SNAPSHOT_BASE = 'http://localhost:8000/snapshots';
+
 const EventLog = () => {
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [wsConnected, setWsConnected] = useState(false);
+    const wsRef = useRef(null);
 
-    // Poll for new events every 2 seconds
+    // Initial load via REST
     useEffect(() => {
-        const loadEvents = async () => {
-            const data = await fetchEvents(50);
+        fetchEvents(50).then(data => {
             setEvents(data);
             setLoading(false);
+        });
+    }, []);
+
+    // Real-time updates via WebSocket; fall back to polling if WS unavailable
+    useEffect(() => {
+        let fallbackInterval = null;
+
+        const connect = () => {
+            try {
+                const ws = new WebSocket(WS_URL);
+                wsRef.current = ws;
+
+                ws.onopen = () => setWsConnected(true);
+
+                ws.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'ping') return;
+                    setEvents(prev => [data, ...prev].slice(0, 100));
+                };
+
+                ws.onclose = () => {
+                    setWsConnected(false);
+                    // Fall back to polling every 2s if WebSocket drops
+                    fallbackInterval = setInterval(() => {
+                        fetchEvents(50).then(setEvents);
+                    }, 2000);
+                };
+
+                ws.onerror = () => ws.close();
+            } catch {
+                // WebSocket not available at all — use polling
+                fallbackInterval = setInterval(() => {
+                    fetchEvents(50).then(setEvents);
+                }, 2000);
+            }
         };
 
-        loadEvents();
-        const interval = setInterval(loadEvents, 2000);
-        return () => clearInterval(interval);
+        connect();
+        return () => {
+            wsRef.current?.close();
+            clearInterval(fallbackInterval);
+        };
     }, []);
+
+    const getSnapshotFilename = (path) => {
+        if (!path) return null;
+        return path.replace(/\\/g, '/').split('/').pop();
+    };
 
     return (
         <div className="card" style={{ height: '100%' }}>
@@ -27,8 +73,8 @@ const EventLog = () => {
                     <ShieldAlert size={18} color="var(--danger)" />
                     <span>Intrusion Alert Log</span>
                 </div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Live Updates
+                <span style={{ fontSize: '0.75rem', color: wsConnected ? 'var(--accent)' : 'var(--text-muted)' }}>
+                    {wsConnected ? '⬤ Live' : 'Polling'}
                 </span>
             </div>
 
@@ -43,29 +89,37 @@ const EventLog = () => {
                     </div>
                 ) : (
                     <div className="event-list">
-                        {events.map((evt) => (
-                            <div key={evt.id} className="event-item">
-                                <div className="event-icon">
-                                    <ShieldAlert size={20} />
-                                </div>
-                                <div className="event-content">
-                                    <div className="event-header">
-                                        <div className="event-title">Intrusion: {evt.zone}</div>
-                                        <div className="event-time">
-                                            {formatDistanceToNow(parseISO(evt.timestamp), { addSuffix: true })}
-                                        </div>
+                        {events.map((evt) => {
+                            const snapshotFile = getSnapshotFilename(evt.snapshot_path);
+                            return (
+                                <div key={evt.id} className="event-item">
+                                    <div className="event-icon">
+                                        <ShieldAlert size={20} />
                                     </div>
-                                    <div className="event-details">
-                                        Track ID: {evt.object_id} &bull; Camera: {evt.camera_id}
-                                    </div>
-                                    {evt.snapshot_path && (
-                                        <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--accent)', cursor: 'pointer' }}>
-                                            <ImageIcon size={14} /> View Snapshot
+                                    <div className="event-content">
+                                        <div className="event-header">
+                                            <div className="event-title">Intrusion: {evt.zone}</div>
+                                            <div className="event-time">
+                                                {formatDistanceToNow(parseISO(evt.timestamp), { addSuffix: true })}
+                                            </div>
                                         </div>
-                                    )}
+                                        <div className="event-details">
+                                            Track ID: {evt.object_id} &bull; Camera: {evt.camera_id}
+                                        </div>
+                                        {snapshotFile && (
+                                            <a
+                                                href={`${SNAPSHOT_BASE}/${snapshotFile}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{ marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--accent)', textDecoration: 'none' }}
+                                            >
+                                                <ImageIcon size={14} /> View Snapshot
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

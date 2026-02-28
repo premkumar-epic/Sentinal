@@ -1,5 +1,28 @@
-ultralytics>=8.0.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-PyQt5>=5.15.0
+# SENTINALv1 — pinned dependencies (as of v1.0)
+# Install: pip install -r requirements.txt
+
+# Core vision
+ultralytics==8.3.107
+opencv-python==4.10.0.84
+numpy==1.26.4
+
+# Inference
+torch==2.3.1
+torchvision==0.18.1
+
+# Desktop GUI
+PyQt5==5.15.11
+
+# Backend API
+fastapi==0.133.0
+uvicorn==0.41.0
+pydantic==2.12.5
+pydantic-settings==2.13.1
+python-dotenv==1.2.1
+websockets==12.0
+
+# Database
+psycopg2-binary==2.9.11
+
+# Utilities
 pyyaml>=6.0.0

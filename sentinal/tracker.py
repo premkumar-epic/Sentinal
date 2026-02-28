@@ -37,6 +37,14 @@ class ObjectTracker:
         except Exception:  # noqa: BLE001
             pass
 
+        # Warmup: run a dummy frame to trigger JIT so the first real frame isn't slow
+        try:
+            dummy = np.zeros((360, 640, 3), dtype=np.uint8)
+            self._model.track(source=dummy, conf=self._conf, classes=[0],
+                              persist=False, verbose=False, device="cpu")
+        except Exception:  # noqa: BLE001
+            pass
+
     def track(self, frame: np.ndarray) -> List[Track]:
         """Run tracking on a frame and return tracked person objects."""
         results = self._model.track(
