@@ -34,6 +34,7 @@ class SurveillancePipeline:
                 ttl_seconds=float(getattr(self._model_cfg, "reid_ttl_seconds", 15.0)),
                 min_similarity=float(getattr(self._model_cfg, "reid_min_similarity", 0.60)),
                 ema_alpha=float(getattr(self._model_cfg, "reid_ema_alpha", 0.90)),
+                database_url=self._alert_cfg.database_url,
             )
         )
         self._zones = ZoneManager(config.zones)

@@ -9,6 +9,15 @@ import numpy as np
 import torch
 import torchvision.models as models
 import torchvision.transforms as T
+import uuid
+import os
+from PIL import Image
+from facenet_pytorch import MTCNN, InceptionResnetV1
+
+from Core_AI.db import load_all_identities, save_identity, update_identity_last_seen
+from Core_AI.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 BBox = Tuple[float, float, float, float]
@@ -21,6 +30,7 @@ class StitcherConfig:
     min_similarity: float = 0.75  # Cosine similarity threshold
     max_lost: int = 50
     ema_alpha: float = 0.90
+    database_url: str = ""
 
 
 @dataclass
@@ -43,6 +53,13 @@ class TrackIdStitcher:
         self._active_map: Dict[int, int] = {}  # track_id -> stable_id
         self._lost: List[_LostTrack] = []
         
+        self._stable_names: Dict[int, str] = {}
+        self._known_faces: List[Dict] = []
+        
+        if config.database_url:
+            self._known_faces = load_all_identities(config.database_url)
+            logger.info("Loaded %d known identities from database.", len(self._known_faces))
+        
         if config.enabled:
             # Initialize MobileNetV3 for feature extraction
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,6 +74,15 @@ class TrackIdStitcher:
                 T.ToTensor(),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
+            
+            # Initialize FaceNet for permanent Identity Stitching
+            try:
+                self._mtcnn = MTCNN(keep_all=False, device=self._device, min_face_size=40)
+                self._resnet = InceptionResnetV1(pretrained='vggface2').eval().to(self._device)
+                logger.info("FaceNet components initialized on %s.", self._device)
+            except Exception as e:
+                logger.error("Failed to load FaceNet: %s", e)
+                self._mtcnn = None
 
     def assign(self, frame: np.ndarray, tracks: Iterable[dict]) -> List[dict]:
         """Return tracks with an added 'stable_id' field."""
@@ -115,6 +141,14 @@ class TrackIdStitcher:
             features = track_features[idx]
             if features is not None:
                 self._upsert_lost(stable_id, features, now)
+
+            # --- Permanent Face Recognition Logic ---
+            if stable_id not in self._stable_names and self._mtcnn is not None:
+                recognized_name = self._try_recognize_face(frame, t["bbox"], stable_id)
+                if recognized_name:
+                    self._stable_names[stable_id] = recognized_name
+            
+            t["name"] = self._stable_names.get(stable_id, f"Unknown_{stable_id}")
 
         return tracks_list
 
@@ -194,6 +228,63 @@ class TrackIdStitcher:
             pass
             
         return results
+
+    def _try_recognize_face(self, frame: np.ndarray, bbox: Tuple[float, float, float, float], stable_id: int) -> Optional[str]:
+        x1, y1, x2, y2 = bbox
+        h, w = frame.shape[:2]
+        ix1 = max(0, int(x1))
+        iy1 = max(0, int(y1))
+        ix2 = min(w, int(x2))
+        iy2 = min(h, int(y2))
+        if ix2 <= ix1 or iy2 <= iy1: return None
+        crop = frame[iy1:iy2, ix1:ix2]
+        if crop.size == 0 or crop.shape[0] < 40 or crop.shape[1] < 40: return None
+
+        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(crop_rgb)
+        
+        try:
+            face_tensor = self._mtcnn(pil_img)
+            if face_tensor is None: return None
+            with torch.inference_mode():
+                emb = self._resnet(face_tensor.unsqueeze(0).to(self._device)).cpu().numpy()[0]
+            
+            norm = np.linalg.norm(emb)
+            if norm > 0: emb = emb / norm
+
+            best_match_name = None
+            best_score = -1.0
+            matched_id = None
+            
+            for record in self._known_faces:
+                db_emb = np.frombuffer(record["face_encoding"], dtype=np.float32)
+                score = float(np.dot(emb, db_emb))
+                if score > best_score:
+                    best_score = score
+                    best_match_name = record["name"]
+                    matched_id = record["id"]
+                    
+            if best_match_name and best_score >= 0.85:
+                # Update last seen timestamp and return the Known Name
+                from datetime import datetime
+                update_identity_last_seen(self._cfg.database_url, matched_id, datetime.utcnow())
+                return best_match_name
+                
+            # Face not found in DB! Save it as a new Unknown identity
+            uid = str(uuid.uuid4())
+            new_name = f"Unknown_{stable_id}"
+            os.makedirs("snapshots", exist_ok=True)
+            snap_path = f"snapshots/{uid}.jpg"
+            cv2.imwrite(snap_path, cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2BGR))
+            
+            # Save the raw bytes
+            save_identity(self._cfg.database_url, uid, emb.tobytes(), snap_path)
+            self._known_faces.append({"id": uid, "name": new_name, "face_encoding": emb.tobytes()})
+            return new_name
+            
+        except Exception as e:
+            logger.debug("Face recognition error: %s", e)
+            return None
 
     def _upsert_lost(self, stable_id: int, features: np.ndarray, now: float) -> None:
         for lt in self._lost:

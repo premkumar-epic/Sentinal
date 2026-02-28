@@ -47,6 +47,15 @@ def init_db(db_url: str) -> None:
         snapshot_path TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+
+    CREATE TABLE IF NOT EXISTS identities (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100),
+        face_encoding BYTEA NOT NULL,
+        snapshot_path TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """
     p = _get_pool(db_url)
     if p is None:
@@ -118,3 +127,84 @@ def get_recent_events(db_url: str, limit: int = 50) -> list:
     finally:
         if conn:
             p.putconn(conn)
+
+
+def save_identity(db_url: str, identity_id: str, face_encoding: bytes, snapshot_path: str) -> None:
+    """Save a new unknown identity with their facial embedding vector."""
+    if not db_url:
+        return
+    query = """
+    INSERT INTO identities (id, face_encoding, snapshot_path)
+    VALUES (%s, %s, %s)
+    ON CONFLICT (id) DO NOTHING
+    """
+    p = _get_pool(db_url)
+    if p is None: return
+    conn = None
+    try:
+        conn = p.getconn()
+        with conn.cursor() as cur:
+            cur.execute(query, (identity_id, face_encoding, snapshot_path))
+        conn.commit()
+    except Exception as exc:
+        logger.error("Failed to save identity to db: %s", exc)
+    finally:
+        if conn: p.putconn(conn)
+
+
+def load_all_identities(db_url: str) -> list[dict]:
+    """Load all saved identities and their feature vectors to be matched against active frames."""
+    if not db_url:
+        return []
+    p = _get_pool(db_url)
+    if p is None: return []
+    conn = None
+    try:
+        conn = p.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, face_encoding FROM identities")
+            rows = cur.fetchall()
+        return [{"id": r[0], "name": r[1], "face_encoding": r[2]} for r in rows]
+    except Exception as exc:
+        logger.error("Failed to load identities: %s", exc)
+        return []
+    finally:
+        if conn: p.putconn(conn)
+
+
+def update_identity_name(db_url: str, identity_id: str, name: str) -> None:
+    """Update an unknown identity with a user-provided name label."""
+    if not db_url:
+        return
+    query = "UPDATE identities SET name = %s WHERE id = %s"
+    p = _get_pool(db_url)
+    if p is None: return
+    conn = None
+    try:
+        conn = p.getconn()
+        with conn.cursor() as cur:
+            cur.execute(query, (name, identity_id))
+        conn.commit()
+    except Exception as exc:
+        logger.error("Failed to update identity name: %s", exc)
+    finally:
+        if conn: p.putconn(conn)
+
+def update_identity_last_seen(db_url: str, identity_id: str, ts: datetime) -> None:
+    """Update the last_seen timestamp when an identity is detected again."""
+    if not db_url:
+        return
+    query = "UPDATE identities SET last_seen = %s WHERE id = %s"
+    p = _get_pool(db_url)
+    if p is None: return
+    conn = None
+    try:
+        conn = p.getconn()
+        with conn.cursor() as cur:
+            cur.execute(query, (ts, identity_id))
+        conn.commit()
+    except Exception as exc:
+        logger.error("Failed to update identity last_seen: %s", exc)
+    finally:
+        if conn: p.putconn(conn)
+

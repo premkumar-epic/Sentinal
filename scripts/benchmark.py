@@ -7,8 +7,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config import load_config
-from sentinal.pipeline import SurveillancePipeline
+from Core_AI.config import load_config
+from Core_AI.pipeline import SurveillancePipeline
 
 VIDEO_URL = "https://github.com/intel-iot-devkit/sample-videos/raw/master/people-detection.mp4"
 VIDEO_PATH = "sample_video.mp4"
