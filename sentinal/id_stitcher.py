@@ -94,13 +94,16 @@ class TrackIdStitcher:
                 self._active_map[tid] = stable_id
                 used_stable_ids.add(stable_id)
                 t["stable_id"] = stable_id
+                t["reid_score"] = 1.0
                 continue
 
-            match = self._best_match(features, used_stable_ids)
-            if match is not None:
-                stable_id = match
+            match_id, match_score = self._best_match(features, used_stable_ids)
+            if match_id is not None:
+                stable_id = match_id
+                t["reid_score"] = match_score
             else:
                 stable_id = self._new_stable_id(used_stable_ids, preferred=tid)
+                t["reid_score"] = 1.0
             self._active_map[tid] = stable_id
             used_stable_ids.add(stable_id)
             t["stable_id"] = stable_id
@@ -131,7 +134,7 @@ class TrackIdStitcher:
             self._lost.sort(key=lambda x: x.last_seen, reverse=True)
             self._lost = self._lost[: self._cfg.max_lost]
 
-    def _best_match(self, features: np.ndarray, used_stable_ids: set[int]) -> Optional[int]:
+    def _best_match(self, features: np.ndarray, used_stable_ids: set[int]) -> Tuple[Optional[int], float]:
         best_id: Optional[int] = None
         best_score = -1.0
         for lt in self._lost:
@@ -145,8 +148,8 @@ class TrackIdStitcher:
         import logging
         logging.getLogger("sentinal.reid").debug("Best match candidate: id=%s score=%.4f threshold=%.2f", best_id, best_score, self._cfg.min_similarity)
         if best_id is not None and best_score >= self._cfg.min_similarity:
-            return best_id
-        return None
+            return best_id, best_score
+        return None, 0.0
 
     def _compute_batch_features(self, frame: np.ndarray, tracks: List[dict]) -> List[Optional[np.ndarray]]:
         h, w = frame.shape[:2]

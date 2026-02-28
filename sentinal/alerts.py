@@ -99,6 +99,25 @@ class AlertManager:
                 daemon=True,
             ).start()
 
+            # Windows Desktop Notification (IMP-14)
+            def _show_toast():
+                try:
+                    from win10toast import ToastNotifier
+                    toaster = ToastNotifier()
+                    toaster.show_toast(
+                        "SENTINAL Intrusion Alert",
+                        f"Movement detected in {event.zone_label} (ID: {event.track_id})",
+                        icon_path=None,
+                        duration=5,
+                        threaded=True
+                    )
+                except ImportError:
+                    pass
+                except Exception as exc:
+                    logger.debug("Desktop notification failed: %s", exc)
+
+            threading.Thread(target=_show_toast, daemon=True).start()
+
         # Batch write all rows to CSV in a single open()
         if rows_to_write:
             try:

@@ -32,7 +32,11 @@ class ZoneManager:
     """Manage multiple polygon zones and raise entry events per track ID."""
 
     def __init__(self, configs: Iterable[ZoneConfig]) -> None:
-        self._zones: List[Zone] = [
+        self.set_zones(configs)
+
+    def set_zones(self, configs: Iterable[ZoneConfig]) -> None:
+        """Update active tracking zones at runtime without restarting the pipeline."""
+        self._zones = [
             Zone(
                 id=cfg.id,
                 label=cfg.label,

@@ -47,8 +47,9 @@ def draw_overlays(frame: np.ndarray, tracks: Iterable[dict], zone_manager: ZoneM
         # Compute zone membership once (not per-zone check repeated in loop)
         is_in_zone = any(point_in_polygon((nx, ny), z.polygon) for z in zones)
 
+        score = track.get("reid_score", 1.0)
         color = _INTRUDER_COLOR if is_in_zone else _track_color(track_id)
-        label = f"ID {track_id}" + (" [!]" if is_in_zone else "")
+        label = f"ID {track_id} ({score:.2f})" + (" [!]" if is_in_zone else "")
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.circle(frame, (nx, ny), radius=4, color=_FOOT_DOT_COLOR, thickness=-1)

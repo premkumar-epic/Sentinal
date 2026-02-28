@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from backend.core.config import settings
-from backend.routers import health, events, video, zones, ws
+from backend.routers import health, events, video, zones, ws, cameras, stats
 from backend.services.video_service import video_manager
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -39,6 +39,8 @@ app.include_router(events.router, tags=["Events"])
 app.include_router(video.router, tags=["Video"])
 app.include_router(zones.router, tags=["Zones"])
 app.include_router(ws.router, tags=["WebSocket"])
+app.include_router(cameras.router, tags=["Cameras"])
+app.include_router(stats.router, tags=["Stats"])
 
 # Serve snapshot images as static files
 _snapshots_dir = Path("snapshots")
