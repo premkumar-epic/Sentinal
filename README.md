@@ -1,150 +1,68 @@
-You are a senior AI computer vision engineer and Python architect.
+# SENTINALv1: Production AI Surveillance System
 
-We are building a production-ready AI surveillance MVP system.
+SENTINALv1 is a modular, zero-cloud AI video surveillance MVP designed for local, on-premise execution. It provides real-time YOLOv8n object detection, MobileNet Re-ID persistent tracking, mathematical zone-intrusion detection, and alert logging via a PostgreSQL database.
 
-PROJECT GOAL
+## Architecture
 
-Build a modular, scalable surveillance engine that:
+This system is built for production environments and is cleanly decoupled into a central AI Brain and distributed interfaces.
 
-Works with laptop webcam (real-time)
+### `Core_AI/` (The Brain)
 
-Works with uploaded CCTV video files (.mp4, .avi)
+The engine that runs the intelligence. Contains no GUI or HTTP code.
 
-Performs real-time person detection using YOLOv8n
+- **`pipeline.py`**: The `SurveillancePipeline` generator that yields frames, tracked IDs, and zone events.
+- **`tracker.py`**: Auto-detects PyTorch CUDA hardware acceleration for high FPS YOLO execution.
+- **`id_stitcher.py`**: Persistent Identity tracking utilizing Exponential Moving Average (EMA) feature embeddings to prevent tracking drift across camera occlusions.
+- **`zones.py`**: Mathematical `ray_casting` algorithms calculating whether tracking bounding-box centers intersect with dynamically configured polygon regions.
 
-Performs multi-object tracking using ByteTrack
+### `V2_Desktop/` (Standalone Deployment)
 
-Detects zone intrusion using polygon logic
+The lightweight deployment for a single standalone machine and physical webcam (Case 2: e.g., A Reception Desk).
 
-Logs alerts and saves snapshot images
+- Powered by `PyQt5`. Directly pulls from `Core_AI` to draw bounding boxes and bounding box traces natively in Windows with zero network latency.
 
-Runs on CPU (no GPU dependency)
+### `V3_Web/` (Enterprise / Networked Deployment)
 
-Has clean modular architecture
+The distributed NVR (Network Video Recorder) deployment designed for offices and factories (Cases 1 & 3: e.g., parsing Hikvision/Dahua RTSP IP streams).
 
-Is easily extendable later to RTSP/Hikvision cameras
+- **Backend**: `FastAPI` instance streaming `MJPEG` compressed video over the local network via WebSockets.
+- **Frontend**: `React` (Vite) NVR Control Dashboard allowing security guards to view multiple streams, review database Event Logs, and hot-reload Polygon Zones remotely.
 
-No paid APIs
+## Installation
 
-No cloud services
+Ensure you have Python 3.10+ and (optionally) Node.js installed.
 
-No unnecessary dependencies
+1. Clone the repository and install the environment.
 
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate
+```
 
-FUNCTIONAL REQUIREMENTS
+2. Select your deployment strategy.
 
-VideoSource module:
+**For V2 Desktop:**
 
-Accept mode: webcam or video file
+```bash
+pip install -r V2_Desktop/requirements_v2.txt
+python V2_Desktop/app.py
+```
 
-Handle errors
+**For V3 Web:**
 
-Gracefully handle end-of-video
+```bash
+# Terminal 1 (AI Backend System)
+pip install -r V3_Web/backend/requirements_v3.txt
+python V3_Web/backend/main.py
 
-Provide get_frame() method
+# Terminal 2 (React Dashboard Interface)
+cd V3_Web/frontend
+npm install
+npm run dev
+```
 
-Thread-safe design
+## Production Considerations
 
-Detection module:
-
-Use YOLOv8n
-
-Detect only "person" class
-
-Return bounding boxes in structured dictionary format
-
-Load model once
-
-Tracking module:
-
-Integrate ByteTrack using ultralytics tracking mode
-
-Maintain persistent object IDs
-
-Return tracked objects with ID + bbox
-
-Zone detection:
-
-Accept polygon coordinates from config.py
-
-Check if object center enters polygon
-
-Trigger event only once per ID
-
-Reset if object exits
-
-Alert manager:
-
-Log alerts to text file
-
-Save frame snapshot to folder
-
-Include timestamp + object ID
-
-Avoid duplicate alerts
-
-main.py:
-
-Parse CLI arguments:
---source webcam
---source video --path file.mp4
-
-Initialize all modules
-
-Run processing loop
-
-Draw bounding boxes + tracking IDs
-
-Draw zone polygon
-
-Trigger alerts
-
-Exit on 'q'
-
-Release resources properly
-
-PERFORMANCE REQUIREMENTS
-
-Must work smoothly on CPU
-
-Use yolov8n only
-
-Add optional frame skipping
-
-Handle exceptions without crashing
-
-Use logging module (not print)
-
-CODING RULES
-
-Use type hints
-
-Use OOP design
-
-Clean separation of concerns
-
-No global variables
-
-Add docstrings
-
-Production-style error handling
-
-Avoid unnecessary comments
-
-Write clean and scalable code
-
-IMPORTANT
-
-We will build this file by file.
-
-Do NOT generate entire project in one response.
-
-First:
-
-Generate the folder structure.
-
-Explain module responsibilities.
-
-Then ask me which file to generate first.
-
-Wait for my confirmation before generating files.
+- **Hardware Acceleration:** SENTINAL automatically checks for NVidia GPU capabilities via `torch.cuda.is_available()`. Ensure appropriate PyTorch CUDA drivers are installed on the host machine to easily exceed 30+ FPS.
+- **PostgreSQL Database:** By default, alerts only log to `logs/sentinal.log` if `DATABASE_URL` is empty. Set your `.env` appropriately to enable persistent PostgreSQL tracking.
+- **Zone Hot-Reloading:** In V3 Web, creating a zone on the UI canvas pushes a REST command to the Backend, which automatically injects the new polygon coordinates into the running `SurveillancePipeline` without dropping video frames.
