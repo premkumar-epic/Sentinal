@@ -5,8 +5,8 @@ from typing import Iterable, List, Tuple
 import cv2
 import numpy as np
 
-from sentinal.utils.geometry import bbox_bottom_center, point_in_polygon
-from sentinal.zones import Zone, ZoneManager
+from Core_AI.utils.geometry import bbox_bottom_center, point_in_polygon
+from Core_AI.zones import Zone, ZoneManager
 
 
 Color = Tuple[int, int, int]

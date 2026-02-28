@@ -9,9 +9,9 @@ from typing import Dict, Iterable, List, Tuple
 
 import cv2
 
-from config import AlertConfig
-from sentinal.db import init_db, insert_event
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import AlertConfig
+from Core_AI.db import init_db, insert_event
+from Core_AI.utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)

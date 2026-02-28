@@ -9,8 +9,8 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from config import VideoConfig
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import VideoConfig
+from Core_AI.utils.logging_utils import get_logger
 
 
 Frame = np.ndarray
@@ -43,7 +43,7 @@ class VideoSource:
         if source_type == "webcam":
             index = self._config.webcam_index
             logger.info("Opening webcam source index=%s", index)
-            self._capture = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # CAP_DSHOW faster on Windows
+            self._capture = cv2.VideoCapture(index)  # Default backend (CAP_DSHOW fails on some Windows drivers)
         elif source_type == "video":
             if self._config.video_path is None:
                 raise VideoSourceError("Video path must be provided for 'video' source type.")

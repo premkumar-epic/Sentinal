@@ -7,7 +7,7 @@ from typing import Optional
 import psycopg2
 from psycopg2 import pool
 
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

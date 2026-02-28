@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 from ultralytics import YOLO
 
-from config import ModelConfig
+from Core_AI.config import ModelConfig
 
 
 Track = Dict[str, object]

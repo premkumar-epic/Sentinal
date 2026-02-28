@@ -2,9 +2,9 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter
 from typing import Dict, Any
 
-from config import load_config
-from sentinal.db import _get_pool
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import load_config
+from Core_AI.db import _get_pool
+from Core_AI.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()

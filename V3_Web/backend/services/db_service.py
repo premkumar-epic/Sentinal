@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from config import load_config
+from Core_AI.config import load_config
 
 cfg = load_config()
 

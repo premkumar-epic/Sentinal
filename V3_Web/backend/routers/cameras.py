@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from typing import List, Dict, Any
 
-from backend.services.video_service import video_manager
+from services.video_service import video_manager
 
 router = APIRouter()
 

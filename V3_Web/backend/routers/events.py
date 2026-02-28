@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 from typing import List
 
-from backend.models.event import EventResponse
-from backend.services.db_service import get_recent_events
+from models.event import EventResponse
+from services.db_service import get_recent_events
 
 router = APIRouter()
 

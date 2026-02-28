@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Tuple
 
-from config import load_config, ZoneConfig
-from backend.services.video_service import video_manager
+from Core_AI.config import load_config, ZoneConfig
+from services.video_service import video_manager
 
 router = APIRouter()
 

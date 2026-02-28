@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Iterable, List, Set, Tuple
 
-from config import ZoneConfig
-from sentinal.utils.geometry import bbox_bottom_center, point_in_polygon
+from Core_AI.config import ZoneConfig
+from Core_AI.utils.geometry import bbox_bottom_center, point_in_polygon
 
 
 Point = Tuple[float, float]

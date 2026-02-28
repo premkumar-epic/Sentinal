@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
 
+# Allow importing Core_AI from the parent directory
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import cv2
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from config import AppConfig, VideoConfig, load_config
-from sentinal.pipeline import SurveillancePipeline
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import AppConfig, VideoConfig, load_config
+from Core_AI.pipeline import SurveillancePipeline
+from Core_AI.utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)

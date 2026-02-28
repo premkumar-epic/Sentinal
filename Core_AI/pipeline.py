@@ -5,14 +5,14 @@ from typing import Generator, List, Tuple
 import cv2
 import numpy as np
 
-from config import AlertConfig, AppConfig, ModelConfig, VideoConfig
-from sentinal.alerts import AlertEvent, AlertManager
-from sentinal.id_stitcher import StitcherConfig, TrackIdStitcher
-from sentinal.tracker import ObjectTracker
-from sentinal.video_source import Frame, VideoSource
-from sentinal.zones import ZoneEvent, ZoneManager
-from sentinal.utils.drawing import draw_overlays
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import AlertConfig, AppConfig, ModelConfig, VideoConfig
+from Core_AI.alerts import AlertEvent, AlertManager
+from Core_AI.id_stitcher import StitcherConfig, TrackIdStitcher
+from Core_AI.tracker import ObjectTracker
+from Core_AI.video_source import Frame, VideoSource
+from Core_AI.zones import ZoneEvent, ZoneManager
+from Core_AI.utils.drawing import draw_overlays
+from Core_AI.utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
@@ -40,7 +40,7 @@ class SurveillancePipeline:
         self._alerts = AlertManager(self._alert_cfg)
         self._frame_skip = max(0, self._video_cfg.frame_skip)
         
-        from sentinal.db import init_db
+        from Core_AI.db import init_db
         init_db(self._alert_cfg.database_url)
 
     def frames(self) -> Generator[Tuple[Frame, List[dict], List[ZoneEvent]], None, None]:

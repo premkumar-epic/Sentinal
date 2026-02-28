@@ -1,16 +1,16 @@
 import sys
 from pathlib import Path
 
-# Provide absolute package resolution for imports in the backend referencing sentinal
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+# Provide absolute package resolution for imports in the backend referencing Core_AI
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from backend.core.config import settings
-from backend.routers import health, events, video, zones, ws, cameras, stats
-from backend.services.video_service import video_manager
+from core.config import settings
+from routers import health, events, video, zones, ws, cameras, stats
+from services.video_service import video_manager
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -49,4 +49,4 @@ app.mount("/snapshots", StaticFiles(directory=str(_snapshots_dir)), name="snapsh
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

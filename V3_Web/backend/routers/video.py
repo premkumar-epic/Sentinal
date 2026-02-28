@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from backend.services.video_service import video_manager
-from config import load_config
+from services.video_service import video_manager
+from Core_AI.config import load_config
 
 router = APIRouter()
 cfg = load_config()

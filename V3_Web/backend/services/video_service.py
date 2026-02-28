@@ -10,9 +10,9 @@ import time
 from collections import deque
 from typing import Dict, Generator, Optional, Set
 
-from config import AppConfig, VideoConfig, load_config
-from sentinal.pipeline import SurveillancePipeline
-from sentinal.utils.logging_utils import get_logger
+from Core_AI.config import AppConfig, VideoConfig, load_config
+from Core_AI.pipeline import SurveillancePipeline
+from Core_AI.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
