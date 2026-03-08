@@ -1,0 +1,14 @@
+# .claudeignore
+models/
+data/snapshots/
+data/logs/
+dashboard/node_modules/
+dashboard/dist/
+__pycache__/
+*.pyc
+*.pth
+*.pt
+*.onnx
+.venv/
+venv/
+*.db

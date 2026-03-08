@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(curl:*)",
+      "Bash(gemini:*)",
+      "Bash(timeout 60 bash:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(timeout 120 bash:*)",
+      "Bash(/tmp/face_tuning_summary.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(docker compose:*)",
+      "Bash(/tmp/zones_prompt.txt:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

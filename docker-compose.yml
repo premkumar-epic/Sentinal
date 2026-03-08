@@ -1,0 +1,44 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sentinal
+      POSTGRES_USER: sentinal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  engine:
+    build: .
+    runtime: nvidia
+    environment:
+      - DB_URL=postgresql+asyncpg://sentinal:${POSTGRES_PASSWORD}@postgres/sentinal
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # network_mode: host needed for camera discovery on local network (DroidCam/IP Webcam)
+    network_mode: host
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "5173:80"
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
