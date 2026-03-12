@@ -12,7 +12,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from api.limiter import limiter
 from engine.config import settings
 from engine.storage.db import init_db
 
@@ -29,19 +32,49 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.logs_dir, exist_ok=True)
 
     # Lazy import to avoid circular imports at module load time
-    from api.services.camera_service import camera_service
+    from api.services.camera_service import camera_service, set_event_loop
 
     logger.info("SENTINAL v2 starting up…")
+
+    # Capture the running asyncio loop so daemon threads can schedule coroutines
+    import asyncio
+    set_event_loop(asyncio.get_running_loop())
+
     await init_db()
+
+    # Load known identities into Re-ID engine at startup
+    try:
+        from engine.storage.db import get_identities
+
+        identities = await get_identities()
+        camera_service.load_identities(identities)
+        logger.info("Loaded %d known identities into Re-ID engine", len(identities))
+    except Exception as exc:
+        logger.warning("Could not load identities into Re-ID engine: %s", exc)
+
     camera_service.restore_cameras()
     _load_startup_cameras(camera_service)
+    
+    # Start the alert listener to receive events from multiprocessing queues
+    camera_service.start_listener()
+    
     logger.info("Startup complete.")
 
     yield
 
     logger.info("SENTINAL v2 shutting down…")
     camera_service.stop_all()
-    logger.info("All camera pipelines stopped.")
+    
+    # Shut down singletons
+    from api.services.camera_service import _get_alert_manager, _get_zone_manager
+    am = _get_alert_manager()
+    if am:
+        am.stop()
+    zm = _get_zone_manager()
+    if zm:
+        zm.stop()
+
+    logger.info("All camera pipelines and managers stopped.")
 
 
 def _load_startup_cameras(camera_service) -> None:
@@ -88,17 +121,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "http://localhost:5175",
-        "http://127.0.0.1:5175",
-        "http://192.168.1.*",
-    ],
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"^https?://192\.168\.\d+\.\d+(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -108,7 +139,7 @@ app.add_middleware(
 # Routers — import here so they register after the app object is created.
 # Each router module may also import camera_service lazily.
 # ---------------------------------------------------------------------------
-from api.routers import cameras, stream, ws, zones, events, identities, alerts, stats, auth  # noqa: E402
+from api.routers import cameras, stream, ws, zones, events, identities, alerts, stats, auth, modules  # noqa: E402
 from api.middleware.auth import get_current_user  # noqa: E402
 
 _auth_dep = [Depends(get_current_user)]
@@ -122,8 +153,17 @@ app.include_router(zones.router, dependencies=_auth_dep)      # already has /api
 app.include_router(events.router, dependencies=_auth_dep)     # already has /api paths
 app.include_router(identities.router, dependencies=_auth_dep) # already has /api/identities prefix
 app.include_router(alerts.router, dependencies=_auth_dep)     # already has /api/alerts prefix
+app.include_router(modules.router, prefix="/api", dependencies=_auth_dep)
 app.include_router(stats.router, prefix="/api", dependencies=_auth_dep)
 
 # Unprotected routers — browsers cannot send Bearer headers on <img> or WS
 app.include_router(stream.router, prefix="/api")  # MJPEG stream via <img src="...">
 app.include_router(ws.router, prefix="/ws")       # WebSocket live feed
+app.include_router(events.snapshot_router)         # Snapshot images via <img src="...">
+
+
+# Unauthenticated health probe for Docker/K8s/load-balancer liveness checks
+@app.get("/health")
+async def health_check() -> dict:
+    """Unauthenticated health probe — returns 200 OK if the service is running."""
+    return {"status": "ok", "service": "SENTINAL v2"}

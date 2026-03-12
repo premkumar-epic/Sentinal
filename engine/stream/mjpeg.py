@@ -6,7 +6,7 @@ Uses asyncio.Queue(maxsize=2) — drops oldest frame when full (non-blocking pus
 
 import asyncio
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import cv2
 import numpy as np
@@ -26,14 +26,21 @@ class MJPEGBuffer:
     Pull model: FastAPI iterates frame_generator() in an async context.
     """
 
-    def __init__(self, cam_id: str) -> None:
+    def __init__(self, cam_id: str, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
         self.cam_id = cam_id
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=2)
+        from engine.config import settings
+        self._jpeg_quality: int = settings.mjpeg_jpeg_quality
+        
         # Capture the event loop to safely interact with the queue from threads
-        try:
-            self._loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._loop = asyncio.get_event_loop()
+        if loop:
+            self._loop = loop
+        else:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.new_event_loop()
+                logger.warning("MJPEGBuffer[%s]: no running event loop — created a new loop. Pass loop= explicitly.", cam_id)
 
     def push_frame(self, frame: np.ndarray) -> None:
         """
@@ -41,7 +48,7 @@ class MJPEGBuffer:
         Called from a synchronous pipeline thread.
         Drops the oldest frame if the queue is full to avoid lag.
         """
-        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
         if not ok:
             logger.warning("MJPEGBuffer[%s] JPEG encode failed — dropping frame", self.cam_id)
             return

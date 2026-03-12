@@ -7,7 +7,230 @@
 
 ## OPEN (not yet built)
 
-### Phase 6 — Testing, Auth & Performance
+### Phase 10 — Security Hardening & Bug Fixes
+
+### TASK-068
+- **File:** `engine/stream/mjpeg.py`
+- **Agent:** haiku-writer
+- **Depends on:** none
+- **Spec:** Audit B2 — `asyncio.get_event_loop()` deprecated in Python 3.10+, raises RuntimeError in Python 3.12 when no running loop exists
+- **Requirements:**
+  - In `MJPEGBuffer.__init__()`, the `except RuntimeError` fallback at line 43 calls `asyncio.get_event_loop()` — replace this single line with `self._loop = asyncio.new_event_loop()`
+  - Add the following warning log immediately after that line: `logger.warning("MJPEGBuffer[%s]: no running event loop — created a new loop. Pass loop= explicitly.", cam_id)`
+  - Do NOT change any other logic: `__init__` signature, `push_frame`, `_safe_put`, `frame_generator` must remain identical
+  - All existing type hints and docstrings must be preserved unchanged
+- **Test:** `python -c "from engine.stream.mjpeg import MJPEGBuffer; print('OK')"` with venv active
+- **Status:** COMPLETED
+
+---
+
+### TASK-069
+- **File:** `api/routers/auth.py`
+- **Agent:** gemini-coder
+- **Depends on:** none
+- **Spec:** Audit B7 follow-up — `@limiter.limit("5/minute")` is currently applied to an inner `_login` function, not to the registered FastAPI route handler. `slowapi` cannot intercept requests for the inner callable; the rate limit is silently never enforced.
+- **Requirements:**
+  - Remove the inner `_login` async function entirely and remove the `return await _login(request, form_data)` tail call
+  - Move the credential-check + JWT-creation logic directly into the `login` function body
+  - Apply `@limiter.limit("5/minute")` as a decorator directly on the `login` route function, placed on the line immediately above `@router.post("/login")`
+  - The `login` function signature must remain: `async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, str]:`
+  - For the limiter import, use a guarded module-level import to avoid circular imports: `try:\n    from api.main import limiter as _rate_limiter\nexcept ImportError:\n    _rate_limiter = None` then define `_rate_limit = _rate_limiter.limit("5/minute") if _rate_limiter else lambda f: f` and decorate `login` with `@_rate_limit` above `@router.post("/login")`
+  - All existing type hints, docstrings, the `SECRET_KEY` constant, and `ALGORITHM` constant must remain unchanged
+- **Test:** `python -c "from api.routers.auth import router; print('OK')"` with venv active; `python -m pytest tests/test_api_integration.py -v -k login` — login tests must still pass
+- **Status:** COMPLETED
+
+---
+
+### TASK-070
+- **File:** `api/main.py`
+- **Agent:** haiku-writer
+- **Depends on:** TASK-069
+- **Spec:** Audit C9 — No health check endpoint. Docker health probes, Kubernetes liveness checks, and load balancers need `GET /health` returning 200 without authentication.
+- **Requirements:**
+  - Add the following route directly to the `app` object at the end of `api/main.py`, after all `app.include_router(...)` calls: `@app.get("/health")` with handler `async def health_check() -> dict:` returning `{"status": "ok", "service": "SENTINAL v2"}`
+  - This route must NOT appear in the `_auth_dep` dependency list — it must be publicly accessible without a JWT
+  - Do NOT modify any existing imports, middleware, lifespan function, CORS configuration, or router registrations
+- **Test:** `python -c "from api.main import app; routes = [r.path for r in app.routes]; assert '/health' in routes, 'health route missing'; print('OK')"` with venv active
+- **Status:** COMPLETED
+
+---
+
+### TASK-071
+- **File:** `docker-compose.yml`
+- **Agent:** haiku-writer
+- **Depends on:** none
+- **Spec:** Audit D8 — `version: '3.9'` at line 1 is deprecated and ignored by Docker Compose v2+; generates a warning on every invocation
+- **Requirements:**
+  - Delete line 1 (`version: '3.9'`) from `docker-compose.yml`
+  - Delete the blank line immediately following it so the file starts directly with `services:`
+  - Do NOT change any other content — all service definitions, environment variables, volumes, network_mode settings, and the postgres healthcheck must remain identical
+- **Test:** `python -c "import yaml; d=yaml.safe_load(open('docker-compose.yml')); assert 'version' not in d, 'version key still present'; assert 'services' in d; print('OK')"`
+- **Status:** COMPLETED
+
+---
+
+### Phase 9 — Final Gaps
+
+### TASK-067
+- **File:** `dashboard/src/components/ZoneEditor.jsx`
+- **Agent:** react-builder
+- **Depends on:** none
+- **Spec:** SPEC.md Section 10 — components/ZoneEditor.jsx
+- **Requirements:**
+  - Standalone reusable component; accepts props: `cameraId`, `streamUrl`, `existingZone` (optional for edit mode), `onSave(zoneData)`, `onCancel()`
+  - Renders camera MJPEG stream as background: `<img src={streamUrl} style={{ width:'100%' }} />`
+  - Overlaid `<svg>` positioned absolutely, sized to match the img; click on SVG canvas adds polygon vertex at pointer coordinates
+  - Double-click closes the polygon (connect last point to first); apply 300ms debounce so the double-click does not also register as two single-clicks adding two points
+  - Vertex dragging: render each vertex as a `<circle r={6}>` element; `onMouseDown` on a circle enters drag mode; `onMouseMove` on the SVG updates that vertex position; `onMouseUp` exits drag mode
+  - Color picker: `<input type="color" value={color} onChange={...}>` for zone fill color; default `#FF0000`
+  - Label input: `<input type="text" placeholder="Zone label" value={label} onChange={...}>`
+  - "SAVE" button: scales pixel coordinates from display size to natural image size using `getBoundingClientRect()`; calls `onSave({ label, color, polygon: [[x,y],...] })`
+  - "CANCEL" button: calls `onCancel()` without saving
+  - "CLEAR" button: resets vertex list to empty
+  - Inline styles only; dark theme (`background: '#0d0d0d'`, accent `#00e5ff`, surface `#1a1a1a`) matching the existing dashboard
+  - `Zones.jsx` must import `ZoneEditor` and use it for the drawing canvas, replacing its current inline SVG click handler with the component; `Zones.jsx` passes `streamUrl` derived from `${API_BASE}/api/stream/${selectedCamId}` and handles `onSave`/`onCancel`
+- **Test:** `cd dashboard && npm run build` with 0 errors; `ZoneEditor.jsx` exists at `dashboard/src/components/ZoneEditor.jsx`
+- **Status:** COMPLETED
+
+---
+
+### Phase 8 — Polish, Missing Tests & Bug Fixes
+
+### TASK-064
+- **File:** `dashboard/src/store/useStore.js`
+- **Agent:** react-builder
+- **Depends on:** none
+- **Spec:** Bug fix — fetchEvents error return is a truthy non-array object, causing runtime TypeError in callers
+- **Requirements:**
+  - In `fetchEvents`, the catch/error path currently returns `{ events: [], total: 0 }` — a truthy non-array
+  - Callers guard with `if (data)` then call `data.slice()` or `data.forEach()` — both throw TypeError on a plain object
+  - Fix: change the error-path return value to `null` (one-line change only)
+  - Do NOT change any other logic; all existing exports must remain intact
+- **Test:** `cd dashboard && npm run build` with 0 errors
+- **Status:** COMPLETED
+
+---
+
+### TASK-065
+- **File:** `dashboard/src/pages/Events.jsx`
+- **Agent:** react-builder
+- **Depends on:** TASK-064
+- **Spec:** SPEC.md Section 10 — "Export to CSV button"
+- **Requirements:**
+  - Add an "EXPORT CSV" button in the `<header>` section, sibling to the title block
+  - On click: convert current `events` array to CSV with columns: `id`, `timestamp`, `cam_id`, `alert_type`, `zone_id`, `name`, `confidence`
+  - `name` field: use `ev.name` if truthy, else `ev.global_ids?.[0] ?? ''`
+  - Include header row; wrap comma-containing values in double quotes
+  - Trigger download via `new Blob([csv], { type: 'text/csv' })` → temp `<a download="sentinal_events.csv">` → click → revoke URL
+  - Use existing `s.btnGhost` inline style; add `Download` icon from `lucide-react` (already installed)
+  - Disable button when `events.length === 0`
+  - No new npm dependencies
+- **Test:** `cd dashboard && npm run build` with 0 errors
+- **Status:** COMPLETED
+
+---
+
+### TASK-066
+- **File:** `tests/test_ws_auth.py`
+- **Agent:** gemini-coder
+- **Depends on:** none
+- **Spec:** CLAUDE.md — WebSocket /ws/live endpoint auth coverage
+- **Requirements:**
+  - `httpx.AsyncClient` with `ASGITransport(app=app)` — same pattern as `test_api_integration.py`
+  - `@pytest_asyncio.fixture async def client()` identical to existing test file
+  - `test_ws_no_token_rejected`: GET `/ws/live` (no token) → assert status in (403, 426)
+  - `test_ws_invalid_token_rejected`: GET `/ws/live?token=not_a_valid_jwt` → assert status in (403, 426)
+  - `test_ws_valid_token_accepted`: POST login → GET `/ws/live?token=<jwt>` → assert status == 101
+  - All test functions: `@pytest.mark.asyncio`, full type hints, docstrings
+  - Module-level docstring explaining scope
+- **Test:** `python -m pytest tests/test_ws_auth.py -v` — all 3 pass
+- **Status:** COMPLETED
+
+---
+
+### Phase 7 — Dashboard Auth & UX Polish
+
+### TASK-059
+- **File:** `dashboard/src/store/useStore.js`
+- **Agent:** react-builder
+- **Depends on:** none
+- **Spec:** Add auth token state, login/logout actions, and Authorization headers to all API fetches
+- **Requirements:**
+  - Add `token` state field initialized from `localStorage.getItem('sentinal_token')` (preserves session on page refresh)
+  - Add `login(username, password)` async action: POST `${API_BASE}/api/auth/login` with body `username=<val>&password=<val>` and `Content-Type: application/x-www-form-urlencoded`; on HTTP 200 extract `access_token` from JSON, call `localStorage.setItem('sentinal_token', token)`, set `token` in state, return `true`; on 401 or network error return `false`
+  - Add `logout()` action: set `token: null`, call `localStorage.removeItem('sentinal_token')`, call `stopWebSocket()`
+  - Update `fetchCameras` and any other fetch calls inside the store to include header `Authorization: Bearer ${get().token}` when `get().token` is non-null
+  - In `connectWebSocket`: append `?token=${get().token}` to `WS_URL` before constructing `new WebSocket(...)` when token is non-null
+  - Do NOT alter the existing `startWebSocket`, `stopWebSocket`, `weaponAlarm`, `gridLayout`, `dismissWeaponAlarm` logic
+  - All existing exported symbols (`API_BASE`, default `useStore`) must remain exported
+- **Test:** `cd dashboard && npm run build` with 0 errors
+- **Status:** COMPLETED
+
+### TASK-060
+- **File:** `dashboard/src/pages/Login.jsx`
+- **Agent:** react-builder
+- **Depends on:** TASK-059
+- **Spec:** Login page with username/password form, calls useStore login action, redirects on success
+- **Requirements:**
+  - Default export `Login` functional component
+  - Full-page vertically and horizontally centered layout; background `#0d0d0d`; font family `monospace`
+  - Title "SENTINAL v2" in `#00e5ff`, subtitle "Surveillance Control System" in `#555`
+  - Two inputs: `username` (type text) and `password` (type password); dark styling matching the rest of the dashboard
+  - Submit button labeled "LOGIN"; during in-flight request: disable button, change label to "Authenticating..."
+  - On submit: call `login(username, password)` from `useStore`; if `true` returned, call `navigate('/')` via `useNavigate()`
+  - If `false` returned: display error message "Invalid credentials" in `#ff1744` below the button
+  - Inline styles only — no external CSS file or component library imports
+  - Import `useNavigate` from `react-router-dom`; import `useStore` from `../store/useStore`
+- **Test:** `cd dashboard && npm run build` with 0 errors; file exists at `dashboard/src/pages/Login.jsx`
+- **Status:** COMPLETED
+
+### TASK-061
+- **File:** `dashboard/src/App.jsx`
+- **Agent:** react-builder
+- **Depends on:** TASK-059, TASK-060
+- **Spec:** Add /login route, ProtectedRoute wrapper for all other routes, and logout button in nav bar
+- **Requirements:**
+  - Define `ProtectedRoute` component inline in App.jsx (not a separate file): reads `token` from `useStore`; if token is null/falsy renders `<Navigate to="/login" replace />`; otherwise renders the nav bar + `<Outlet />`
+  - Move the nav bar (`<nav>...</nav>`) inside the `ProtectedRoute` render path so it is NOT visible on the `/login` page
+  - Add a logout button at the far right of the nav bar (styled consistently, using the existing button inline style approach): on click calls `useStore.logout()` then `navigate('/login')` via `useNavigate()`
+  - Add `<Route path="/login" element={<Login />} />` as a sibling of the protected wrapper, NOT nested inside it
+  - Wrap all existing page routes (`/`, `/cameras`, `/events`, `/identities`, `/alerts`, `/analytics`, `/zones`) inside `<Route element={<ProtectedRoute />}>` as their parent
+  - Import `Login` from `./pages/Login`; import `Navigate`, `Outlet`, `useNavigate` from `react-router-dom`; import `useStore` from `./store/useStore`
+  - `AlertBanner` must remain rendered inside the protected zone only (move inside ProtectedRoute output if currently at root level)
+- **Test:** `cd dashboard && npm run build` with 0 errors; all 7 existing routes still present; `/login` route present
+- **Status:** COMPLETED
+
+### TASK-062
+- **File:** `dashboard/src/pages/LiveView.jsx`
+- **Agent:** react-builder
+- **Depends on:** TASK-059, TASK-061
+- **Spec:** Add Authorization header to the zones fetch inside CameraCard
+- **Requirements:**
+  - In `CameraCard`, the `useEffect` fetch to `${API_BASE}/api/zones?cam_id=${camera.cam_id}` currently has no auth header
+  - Read the token via `useStore.getState().token` (direct state access — not a hook, since `CameraCard` is not re-rendered on token changes; the token is stable after login)
+  - Add `headers: { Authorization: \`Bearer ${token}\` }` to that fetch call when token is non-null
+  - Do NOT change any other logic in this file — weapon alarm banner, grid layout, WS indicator, event sidebar all remain as-is
+  - The MJPEG `<img src={streamUrl}>` does not need auth (stream endpoint is unprotected by design)
+- **Test:** `cd dashboard && npm run build` with 0 errors
+- **Status:** COMPLETED
+
+### TASK-063
+- **File:** `api/routers/ws.py`
+- **Agent:** gemini-coder
+- **Depends on:** none (backend task, no dependency on dashboard tasks)
+- **Spec:** Add JWT token-as-query-param authentication to the WebSocket /ws/live endpoint
+- **Requirements:**
+  - Add `token: Optional[str] = Query(default=None)` parameter to `websocket_endpoint(websocket, token)`; import `Optional` from `typing` and `Query` from `fastapi`
+  - Before calling `manager.connect()`: if `token` is None or empty string, call `await websocket.close(code=4001)` and return immediately (do not call `accept()` first)
+  - Validate token by decoding with `jose.jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])`; import `jwt` from `jose` and `JWTError` from `jose`; import `settings` from `engine.config`
+  - If `JWTError` is raised, call `await websocket.close(code=4001)` and return; log `logger.warning("WS rejected: invalid or missing token")`
+  - If token is valid, proceed to `await manager.connect(websocket)` as before
+  - Do NOT modify `ConnectionManager`, `broadcast_event`, or any other existing logic
+  - All type hints and docstrings on modified functions must be preserved/updated
+- **Test:** `python -c "from api.routers.ws import router, manager, broadcast_event; print('OK')"` run with venv active
+- **Status:** COMPLETED
+
+---
 
 ## COMPLETED
 
@@ -363,6 +586,55 @@
 
 ## Session Log
 
+### Session 15 — 2026-03-12
+- Phase 10 (Security Hardening & Bug Fixes) planned from Principal Engineer Audit Report
+- Read 16 files, cross-referenced all 19 audit items against current codebase
+- PRE-FLIGHT FINDING: 15 of 19 audit items already resolved in current code
+  - A1-A5 (critical security): all fixed (JWT validator, bcrypt, auth on stream/snapshot, SSRF validation)
+  - B1,B3,B4,B5,B6,B7,B8 (major): all fixed (ThreadPoolExecutor, dedup removed, BLOB, timezone.utc, MAX_CAMERAS enforced, slowapi, asyncio.Lock)
+  - C1,C3,C4 (medium): all fixed (run_coroutine_threadsafe, deque, watchdog stop)
+- 4 genuine gaps remain → TASK-068 through TASK-071
+- Agent breakdown: 3x haiku-writer (068, 070, 071), 1x gemini-coder (069)
+- Dependency: TASK-069 → TASK-070; TASK-068 and TASK-071 independent
+
+### Session 14 — 2026-03-09
+- Full gap audit: read ZoneEditor.jsx, test_ws_auth.py, Login.jsx, api/middleware/auth.py, engine/storage/db.py
+- Cross-referenced SPEC.md Sections 9, 10, 11, 12, and 14 exhaustively
+- All 5 files confirmed present and complete on disk
+- ZoneEditor.jsx: all TASK-067 requirements met (SVG overlay, drag, debounce, coordinate scaling)
+- test_ws_auth.py: all 3 WS auth test cases present (no token, bad token, valid token)
+- Login.jsx, api/middleware/auth.py: JWT auth stack fully implemented
+- engine/storage/db.py: PostgreSQL dual-backend confirmed (_USE_PG flag, asyncpg pool)
+- NO GAPS FOUND — all SPEC.md requirements are implemented. 0 new tasks queued.
+
+### Session 13 — 2026-03-08
+- Phase 9 final gap audit: complete filesystem scan of all 66 COMPLETED tasks vs SPEC.md
+- All engine/, api/, dashboard/, tests/, Docker files confirmed present on disk
+- 1 genuine gap found: `dashboard/src/components/ZoneEditor.jsx`
+  - SPEC.md Section 10 defines it as a distinct named component with vertex dragging
+  - Zones.jsx provides inline SVG polygon drawing but lacks vertex drag and is not a reusable component
+- 1 task queued: TASK-067 (react-builder, no dependencies)
+
+### Session 12 — 2026-03-08
+- Phase 8 gap audit: read 9 files across dashboard + backend + tests
+- Auth header audit: ALL dashboard pages route 100% of API calls through useStore store actions; Bearer tokens injected centrally; zero bare fetch() calls. No auth gaps.
+- Analytics.jsx: real API calls via store actions; no mock data. Complete.
+- EventFeed.jsx / CameraCard.jsx: inline in LiveView.jsx — functionally complete, not a gap.
+- 3 genuine gaps found → TASK-064 through TASK-066:
+  - TASK-064 (bug): useStore.fetchEvents error return is `{ events: [], total: 0 }` — truthy non-array causes TypeError on `.slice()`/`.forEach()`. Fix: return `null`.
+  - TASK-065 (spec gap): Events.jsx missing CSV export. SPEC.md Section 10 explicitly requires it.
+  - TASK-066 (test gap): ws.py 4001 close path is untested. test_api_integration.py covers REST only.
+- Dependency order: TASK-064 → TASK-065 (both react-builder); TASK-066 independent (gemini-coder)
+
+### Session 11 — 2026-03-08
+- Phase 7 (Dashboard Auth & UX Polish) COMPLETED: 5 tasks (TASK-059 through TASK-063)
+- useStore.js: Added token state, login/logout actions, and updated all fetch/websocket calls with auth.
+- Login.jsx: Created new login page with styling matching the dashboard.
+- App.jsx: Implemented ProtectedRoute, added /login route, and integrated Logout button in nav.
+- LiveView.jsx: Updated CameraCard zones fetch with auth header.
+- ws.py: Implemented JWT token-as-query-param authentication for WebSockets.
+- UX Refactor: Centralized all dashboard API calls into useStore actions for cleaner maintenance and consistent auth.
+
 ### Session 10 — 2026-03-08
 - Phase 6 (Testing, Auth & Performance) planned: 6 tasks queued (TASK-053 through TASK-058)
 - Audit: useStore.js EXISTS + complete; all engine/ subdirectory __init__.py files EXIST; only .env.example was missing
@@ -411,3 +683,4 @@
 ### Session 1 — 2026-03-06
 - Setup repo, CLAUDE.md, SPEC.md, agent files
 - Orchestrator queued 13 Phase 1 tasks (TASK-001 through TASK-013)
+

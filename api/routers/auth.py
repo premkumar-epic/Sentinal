@@ -6,10 +6,12 @@ Provides login endpoint and JWT token generation.
 from datetime import datetime, timedelta, timezone
 from typing import Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 
+from api.limiter import limiter
+from api.services.auth_service import verify_password
 from engine.config import settings
 
 # Module-level constants for middleware/other components to import
@@ -19,29 +21,20 @@ ALGORITHM = "HS256"
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+@limiter.limit("5/minute")
 @router.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, str]:
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, str]:
     """
     Authenticate user with username and password, return JWT token.
-
-    Args:
-        form_data: OAuth2 form with username and password fields
-
-    Returns:
-        Dictionary with access_token and token_type
-
-    Raises:
-        HTTPException: 401 if credentials do not match configured auth settings
+    Rate-limited to 5 requests/minute per IP via slowapi.
     """
-    # Validate credentials against settings
-    if form_data.username != settings.auth_username or form_data.password != settings.auth_password:
+    if form_data.username != settings.auth_username or not verify_password(form_data.password, settings.auth_password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Create JWT payload with expiration
     now = datetime.now(timezone.utc)
     exp_time = now + timedelta(minutes=settings.jwt_expire_minutes)
 
@@ -50,7 +43,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, s
         "exp": exp_time,
     }
 
-    # Sign JWT token
     access_token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
     return {"access_token": access_token, "token_type": "bearer"}
