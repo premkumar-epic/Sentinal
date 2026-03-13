@@ -53,15 +53,9 @@ class ZoneResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _get_zone_manager():
-    """Lazy import of zone_manager singleton to avoid circular imports."""
+    """Return the process-wide ZoneManager singleton."""
     from engine.zones.manager import ZoneManager
-    from engine.config import settings as _s
-
-    # Return or create the process-level singleton stored on the module
-    import engine.zones.manager as _mod
-    if not hasattr(_mod, "_singleton"):
-        _mod._singleton = ZoneManager(zones_file=_s.zones_file)
-    return _mod._singleton
+    return ZoneManager.get_instance()
 
 
 def _row_to_response(row: dict) -> ZoneResponse:

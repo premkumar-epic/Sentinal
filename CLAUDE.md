@@ -73,7 +73,7 @@ SENTINALv2/
 ```
 
 ## Tech Stack
-- **Detection**: YOLOv8n / YOLOv11n via Ultralytics (CUDA)
+- **Detection**: YOLOv11l (large) via Ultralytics (CUDA, FP16)
 - **Tracking**: BoT-SORT (built into Ultralytics)
 - **Re-ID**: OSNet-x0.25 via torchreid (trained on Market-1501/DukeMTMC)
 - **Face Recognition**: InsightFace ArcFace (better than FaceNet)

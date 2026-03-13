@@ -91,9 +91,9 @@ async def send_alert_email(alert: Alert, snapshot_path: str) -> None:
                     image_data = f.read()
                 image = MIMEImage(image_data, name=Path(snapshot_path).name)
                 msg.attach(image)
-                logger.debug(f"Attached snapshot: {snapshot_path}")
+                logger.debug("Attached snapshot: %s", snapshot_path)
             except OSError as e:
-                logger.warning(f"Failed to attach snapshot {snapshot_path}: {e}")
+                logger.warning("Failed to attach snapshot %s: %s", snapshot_path, e)
 
         # Send email via aiosmtplib (non-blocking)
         async with aiosmtplib.SMTP(
@@ -104,14 +104,14 @@ async def send_alert_email(alert: Alert, snapshot_path: str) -> None:
             await smtp.send_message(msg)
 
         logger.info(
-            f"Alert email sent for {alert.alert_type.value} "
-            f"(cam_id={alert.cam_id}, alert_id={alert.alert_id})"
+            "Alert email sent for %s (cam_id=%s, alert_id=%s)",
+            alert.alert_type.value, alert.cam_id, alert.alert_id
         )
 
     except Exception as e:
         logger.error(
-            f"Failed to send alert email for {alert.alert_type.value} "
-            f"(cam_id={alert.cam_id}): {e}",
+            "Failed to send alert email for %s (cam_id=%s): %s",
+            alert.alert_type.value, alert.cam_id, e,
             exc_info=True,
         )
         # Never raise — pipeline must not crash due to email failures

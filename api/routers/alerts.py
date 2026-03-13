@@ -1,7 +1,7 @@
 """
 SENTINAL v2 — Alerts Configuration Router
 
-Provides endpoints for managing alert settings (email and webhook) and testing alert channels.
+Provides endpoints for managing alert settings (email, webhook, Telegram) and testing alert channels.
 All endpoints return JSON responses with current configuration state.
 """
 
@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from engine.alerts.email import send_alert_email
 from engine.alerts.manager import Alert, AlertType
+from engine.alerts.telegram import send_telegram_alert
 from engine.alerts.webhook import post_webhook
 from engine.config import settings
 
@@ -40,6 +41,9 @@ class AlertConfigResponse(BaseModel):
     email_password: str  # always "***" or "" (masked)
     webhook_enabled: bool
     webhook_url: str
+    telegram_enabled: bool
+    telegram_bot_token: str  # always "***" or "" (masked)
+    telegram_chat_id: str
 
 
 class AlertConfigUpdate(BaseModel):
@@ -53,6 +57,9 @@ class AlertConfigUpdate(BaseModel):
     email_password: Optional[str] = None
     webhook_enabled: Optional[bool] = None
     webhook_url: Optional[str] = None
+    telegram_enabled: Optional[bool] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
 
 class AlertTestResponse(BaseModel):
@@ -60,6 +67,7 @@ class AlertTestResponse(BaseModel):
 
     email: str  # "sent" | "disabled" | "error: <message>"
     webhook: str  # "sent" | "disabled" | "error: <message>"
+    telegram: str  # "sent" | "disabled" | "error: <message>"
 
 
 # ============================================================================
@@ -71,12 +79,13 @@ def _get_current_config() -> AlertConfigResponse:
     """
     Build the current alert configuration response.
 
-    Masks the email password: returns "***" if non-empty, else "".
+    Masks sensitive fields: returns "***" if non-empty, else "".
 
     Returns:
         AlertConfigResponse with current settings.
     """
     password_mask = "***" if settings.alert_email_password else ""
+    token_mask = "***" if settings.alert_telegram_bot_token else ""
 
     return AlertConfigResponse(
         email_enabled=settings.alert_email_enabled,
@@ -87,6 +96,9 @@ def _get_current_config() -> AlertConfigResponse:
         email_password=password_mask,
         webhook_enabled=settings.alert_webhook_enabled,
         webhook_url=settings.alert_webhook_url,
+        telegram_enabled=settings.alert_telegram_enabled,
+        telegram_bot_token=token_mask,
+        telegram_chat_id=settings.alert_telegram_chat_id,
     )
 
 
@@ -122,8 +134,8 @@ async def get_alert_config() -> AlertConfigResponse:
     """
     Get current alert configuration.
 
-    Returns the current email and webhook alert settings, with the email
-    password field masked for security.
+    Returns the current email, webhook, and Telegram alert settings,
+    with sensitive fields masked for security.
 
     Returns:
         AlertConfigResponse with current settings.
@@ -137,9 +149,7 @@ async def update_alert_config(body: AlertConfigUpdate) -> AlertConfigResponse:
     Update alert configuration.
 
     Accepts an AlertConfigUpdate with optional fields. Only provided fields
-    are updated in the settings object. The email password is handled specially:
-    if provided in the request, it updates the actual password in settings
-    (not masked in storage).
+    are updated in the settings object.
 
     Args:
         body: AlertConfigUpdate with optional fields to update.
@@ -167,6 +177,14 @@ async def update_alert_config(body: AlertConfigUpdate) -> AlertConfigResponse:
     if body.webhook_url is not None:
         settings.alert_webhook_url = body.webhook_url
 
+    # Update Telegram settings if provided
+    if body.telegram_enabled is not None:
+        settings.alert_telegram_enabled = body.telegram_enabled
+    if body.telegram_bot_token is not None:
+        settings.alert_telegram_bot_token = body.telegram_bot_token
+    if body.telegram_chat_id is not None:
+        settings.alert_telegram_chat_id = body.telegram_chat_id
+
     logger.debug("Alert configuration updated")
     return _get_current_config()
 
@@ -174,20 +192,17 @@ async def update_alert_config(body: AlertConfigUpdate) -> AlertConfigResponse:
 @router.post("/test", response_model=AlertTestResponse)
 async def test_alert_channels() -> AlertTestResponse:
     """
-    Test alert channels (email and webhook).
+    Test all alert channels (email, webhook, Telegram).
 
-    Sends a test email (if enabled) and/or test webhook (if enabled) to verify
-    that the alert configuration is working correctly. Catches all exceptions
-    and returns error messages instead of raising.
+    Sends a test alert on each enabled channel to verify configuration.
+    Catches all exceptions and returns error messages instead of raising.
 
     Returns:
-        AlertTestResponse with status for each channel:
-        - "sent": alert was sent successfully
-        - "disabled": alert channel is disabled
-        - "error: <message>": exception occurred while sending
+        AlertTestResponse with status for each channel.
     """
     email_status = "disabled"
     webhook_status = "disabled"
+    telegram_status = "disabled"
 
     # Test email channel
     if settings.alert_email_enabled:
@@ -198,7 +213,7 @@ async def test_alert_channels() -> AlertTestResponse:
             logger.info("Test email sent successfully")
         except Exception as e:
             email_status = f"error: {str(e)}"
-            logger.error(f"Test email failed: {e}", exc_info=True)
+            logger.error("Test email failed: %s", e, exc_info=True)
     else:
         logger.debug("Email alerts disabled; skipping test email")
 
@@ -211,8 +226,21 @@ async def test_alert_channels() -> AlertTestResponse:
             logger.info("Test webhook sent successfully")
         except Exception as e:
             webhook_status = f"error: {str(e)}"
-            logger.error(f"Test webhook failed: {e}", exc_info=True)
+            logger.error("Test webhook failed: %s", e, exc_info=True)
     else:
         logger.debug("Webhook alerts disabled; skipping test webhook")
 
-    return AlertTestResponse(email=email_status, webhook=webhook_status)
+    # Test Telegram channel
+    if settings.alert_telegram_enabled:
+        try:
+            dummy_alert = _build_dummy_alert()
+            await send_telegram_alert(dummy_alert)
+            telegram_status = "sent"
+            logger.info("Test Telegram alert sent successfully")
+        except Exception as e:
+            telegram_status = f"error: {str(e)}"
+            logger.error("Test Telegram failed: %s", e, exc_info=True)
+    else:
+        logger.debug("Telegram alerts disabled; skipping test")
+
+    return AlertTestResponse(email=email_status, webhook=webhook_status, telegram=telegram_status)

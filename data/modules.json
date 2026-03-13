@@ -1,0 +1,25 @@
+{
+  "weapon": {
+    "enabled": true,
+    "config": {
+      "model_path": "models/yolov8s_weapons.pt",
+      "confidence": 0.5,
+      "confirmation_frames": 2
+    }
+  },
+  "ppe": {
+    "enabled": false,
+    "config": {
+      "model_path": "models/yolov8s_ppe.pt",
+      "confidence": 0.5,
+      "required_items": [
+        "helmet",
+        "vest"
+      ]
+    }
+  },
+  "anomaly": {
+    "enabled": true,
+    "config": {}
+  }
+}

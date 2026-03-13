@@ -4,6 +4,7 @@ Threaded camera stream reader with auto-reconnect and exponential backoff.
 """
 
 import logging
+import os
 import threading
 from collections import deque
 from typing import Optional
@@ -12,6 +13,13 @@ import cv2
 import numpy as np
 
 from engine.config import settings
+
+# Force low-latency RTSP: use TCP transport and minimal buffer.
+# Must be set before any VideoCapture is opened.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|analyzeduration;500000|probesize;500000",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,23 +78,39 @@ class VideoSource:
 
     def _open_capture(self) -> Optional[cv2.VideoCapture]:
         """Open a VideoCapture with the required buffer settings."""
+        is_rtsp = isinstance(self.url, str) and self.url.lower().startswith("rtsp://")
+
         # Convert to int if the URL is just a number (e.g. "0" for webcam)
         if self.url.isdigit():
             source = int(self.url)
-            # Use MSMF (Microsoft Media Foundation) on Windows — more reliable than DSHOW
-            cap = cv2.VideoCapture(source, cv2.CAP_MSMF)
+            # Try Default/ANY first
+            cap = cv2.VideoCapture(source, cv2.CAP_ANY)
             if not cap.isOpened():
-                # Fallback: try default backend
-                cap = cv2.VideoCapture(source)
+                # Fallback: try MSMF explicitly
+                cap = cv2.VideoCapture(source, cv2.CAP_MSMF)
+            if not cap.isOpened():
+                # Fallback: try DSHOW as last resort
+                cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+        elif is_rtsp:
+            # RTSP: use FFMPEG backend explicitly for low-latency options
+            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
         else:
             source = self.url
             cap = cv2.VideoCapture(source)
 
         if not cap.isOpened():
             return None
+
         # MANDATORY: prevents frames from being 2-5s old
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FPS, settings.stream_fps_target)
+
+        if is_rtsp:
+            # Reduce RTSP read timeout and force key-frame seek
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+            logger.info("VideoSource[%s] RTSP mode — TCP transport, low-delay buffer", self.cam_id)
+
         return cap
 
     def _capture_loop(self) -> None:
@@ -98,6 +122,7 @@ class VideoSource:
         error_threshold = settings.stream_reconnect_error_threshold
         retry = 0
         cap: Optional[cv2.VideoCapture] = None
+        is_rtsp = isinstance(self.url, str) and self.url.lower().startswith("rtsp://")
 
         while not self._stop_event.is_set():
             # --- connect ---
@@ -129,7 +154,16 @@ class VideoSource:
                 logger.info("VideoSource[%s] stream opened", self.cam_id)
 
             # --- read frame ---
-            ret, frame = cap.read()
+            # For RTSP: grab+retrieve pattern drains the decoder buffer so we
+            # always get the most recent frame (reduces lag by 1-3 seconds).
+            if is_rtsp:
+                # Drain up to 2 extra buffered frames
+                for _ in range(2):
+                    cap.grab()
+                ret, frame = cap.read()
+            else:
+                ret, frame = cap.read()
+
             if not ret or frame is None:
                 logger.warning("VideoSource[%s] read failed — reconnecting", self.cam_id)
                 cap.release()

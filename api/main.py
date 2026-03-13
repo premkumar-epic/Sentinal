@@ -8,9 +8,10 @@ CORS middleware, and router registration.
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -124,12 +125,31 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Simple audit logging middleware for API requests."""
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+
+    # Log: METHOD /PATH - STATUS - PROCESS_TIME ms
+    logger.info(
+        "%s %s - %d - %.2fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        process_time,
+    )
+    return response
+
+
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_origin_regex=r"^https?://192\.168\.\d+\.\d+(:\d+)?$",
+    allow_origin_regex=settings.cors_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -16,7 +16,7 @@ from engine.config import settings
 
 # Module-level constants for middleware/other components to import
 SECRET_KEY = settings.jwt_secret_key
-ALGORITHM = "HS256"
+ALGORITHM = settings.jwt_algorithm
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 

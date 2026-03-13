@@ -3,6 +3,7 @@ SENTINAL v2 — API Router: Identities
 Handles identity management, name updates, and face enrollment.
 """
 
+import logging
 import cv2
 import numpy as np
 from typing import Optional, List
@@ -11,10 +12,9 @@ from pydantic import BaseModel
 
 from engine.storage.db import get_identities, update_identity_name, delete_identity
 
-router = APIRouter(prefix="/api/identities", tags=["identities"])
+logger = logging.getLogger(__name__)
 
-# Module-level singleton for FaceRecognizer
-_face_recognizer: Optional[object] = None
+router = APIRouter(prefix="/api/identities", tags=["identities"])
 
 
 class IdentityResponse(BaseModel):
@@ -48,20 +48,24 @@ async def list_identities() -> List[IdentityResponse]:
 async def update_identity(global_id: str, body: IdentityUpdate) -> dict:
     """
     Update the display name of a specific identity.
-
-    Args:
-        global_id: The unique identifier for the identity.
-        body: The update data containing the new name.
-
-    Returns:
-        A confirmation dictionary with the updated name.
-
-    Raises:
-        HTTPException: 404 if the identity is not found.
+    Also propagates the change to the in-memory FaceRecognizer so
+    the live preview reflects the updated name immediately.
     """
     success = await update_identity_name(global_id, body.name)
     if not success:
         raise HTTPException(status_code=404, detail="Identity not found")
+
+    # Propagate name change to in-memory face recognizer singleton
+    try:
+        from api.services.camera_service import _get_face_recognizer
+        face = _get_face_recognizer()
+        if face is not None:
+            with face._lock:
+                if global_id in face.known_embeddings:
+                    _name_old, emb = face.known_embeddings[global_id]
+                    face.known_embeddings[global_id] = (body.name, emb)
+    except Exception as exc:
+        logger.warning("Could not update in-memory face name: %s", exc)
 
     return {"global_id": global_id, "name": body.name, "updated": True}
 
@@ -69,26 +73,13 @@ async def update_identity(global_id: str, body: IdentityUpdate) -> dict:
 @router.post("/{global_id}/enroll")
 async def enroll_identity(
     global_id: str,
-    name: str = Form(...),
+    name: str = Form(""),
     file: UploadFile = File(...)
 ) -> dict:
     """
-    Enroll a new face identity using an uploaded image.
-
-    Args:
-        global_id: The ID in the path (standardised route, though enrollment generates a new UUID).
-        name: The human-readable name for this identity.
-        file: The image file containing the face to enroll.
-
-    Returns:
-        A dictionary containing the new global_id and enrollment status.
-
-    Raises:
-        HTTPException: 400 if the image is invalid or no face is detected.
-        HTTPException: 503 if face recognition services are unavailable.
+    Enroll a face for an existing identity using an uploaded image.
+    Uses the path global_id so the enrollment is linked to the correct person.
     """
-    global _face_recognizer
-
     # Read file bytes
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
@@ -97,40 +88,38 @@ async def enroll_identity(
     if image is None:
         raise HTTPException(status_code=400, detail="Invalid image file")
 
-    # Lazy-import FaceRecognizer
-    if _face_recognizer is None:
-        try:
-            from engine.vision.face import FaceRecognizer
-            _face_recognizer = FaceRecognizer()
-        except ImportError:
-            raise HTTPException(status_code=503, detail="Face recognition not available")
+    # Use the shared singleton from camera_service (not a local instance)
+    from api.services.camera_service import _get_face_recognizer
+    face = _get_face_recognizer()
+    if face is None:
+        raise HTTPException(status_code=503, detail="Face recognition not available")
 
     try:
-        # Call the singleton instance (ignoring path global_id as per enrollment spec)
-        result_global_id = _face_recognizer.enroll(name, image)
+        result_global_id = face.enroll(name, image, global_id=global_id)
         return {"global_id": result_global_id, "name": name, "enrolled": True}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
+    except RuntimeError:
         raise HTTPException(status_code=503, detail="Face recognition not available")
 
 
 @router.delete("/{global_id}")
 async def remove_identity(global_id: str) -> Response:
     """
-    Delete an identity from the database.
-
-    Args:
-        global_id: The unique identifier to delete.
-
-    Returns:
-        A 204 No Content response on success.
-
-    Raises:
-        HTTPException: 404 if the identity is not found.
+    Delete an identity from the database and remove its snapshot file.
     """
     success = await delete_identity(global_id)
     if not success:
         raise HTTPException(status_code=404, detail="Identity not found")
+
+    # Also remove snapshot file if it exists
+    from pathlib import Path
+    from engine.config import settings
+    snap_path = Path(settings.snapshots_dir) / "identities" / f"{global_id}.jpg"
+    if snap_path.exists():
+        try:
+            snap_path.unlink()
+        except Exception as e:
+            logger.error("Failed to delete snapshot %s: %s", snap_path, e)
 
     return Response(status_code=204)

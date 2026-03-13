@@ -51,6 +51,7 @@ class FaceRecognizer:
         self._app = None
         self._quality_threshold = settings.face_quality_threshold
         self._lock = threading.RLock()
+        self._clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         self.known_embeddings: dict[str, tuple[str, np.ndarray]] = {}
 
         try:
@@ -85,8 +86,7 @@ class FaceRecognizer:
         """
         lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        cl = clahe.apply(l)
+        cl = self._clahe.apply(l)
         limg = cv2.merge((cl, a, b))
         return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
 
@@ -127,13 +127,18 @@ class FaceRecognizer:
 
             # Quality gate: check area and confidence (minimum 0.6)
             threshold = max(self._quality_threshold, 0.6)
-            if area < 500 or det_score < threshold:
-                logger.debug("Face skipped: det_score=%.3f area=%d", det_score, int(area))
+            img_h, img_w = frame.shape[:2]
+            # Reject tiny faces (< 50×50) and faces clipped by frame edges
+            face_clipped = x1 < 0 or y1 < 0 or x2 > img_w or y2 > img_h
+            if area < 2500 or det_score < threshold or face_clipped:
+                logger.debug(
+                    "Face skipped: det_score=%.3f area=%d clipped=%s",
+                    det_score, int(area), face_clipped,
+                )
                 continue
 
             # Multi-crop margin (5% padding) for context
             pad = int(0.05 * max(h, w))
-            img_h, img_w = frame.shape[:2]
             y1_pad = max(0, int(y1) - pad)
             y2_pad = min(img_h, int(y2) + pad)
             x1_pad = max(0, int(x1) - pad)
@@ -143,24 +148,27 @@ class FaceRecognizer:
             # Extract 512-d normalized embedding
             embedding = face.normed_embedding.astype(np.float32)
 
-            # Match against known embeddings by cosine similarity
+            # Match against known embeddings by cosine similarity — find BEST match, not first
             matched_name = None
             matched_global_id = None
+            best_similarity = 0.0
+            _FACE_MATCH_THRESHOLD = settings.face_match_threshold
 
             with self._lock:
                 for global_id, (name, known_embedding) in self.known_embeddings.items():
-                    # Cosine similarity: dot product of normalized vectors
-                    similarity = np.dot(embedding, known_embedding)
-                    if similarity > 0.65:
+                    similarity = float(np.dot(embedding, known_embedding))
+                    if similarity > _FACE_MATCH_THRESHOLD and similarity > best_similarity:
+                        best_similarity = similarity
                         matched_name = name
                         matched_global_id = global_id
-                        logger.debug(
-                            "Face match: name=%s gid=%s score=%.3f",
-                            matched_name,
-                            matched_global_id,
-                            float(similarity),
-                        )
-                        break
+
+                if matched_name is not None:
+                    logger.debug(
+                        "Face match: name=%s gid=%s score=%.3f",
+                        matched_name,
+                        matched_global_id,
+                        best_similarity,
+                    )
 
             # Extract final bbox for result
             bbox = (int(x1), int(y1), int(x2), int(y2))
@@ -177,13 +185,15 @@ class FaceRecognizer:
 
         return results
 
-    def enroll(self, name: str, face_image: np.ndarray) -> str:
+    def enroll(self, name: str, face_image: np.ndarray, global_id: Optional[str] = None, loop: Optional[asyncio.AbstractEventLoop] = None) -> str:
         """
         Enroll a new person by detecting their face in an image and storing the embedding.
 
         Args:
             name: Human-readable name for this identity
             face_image: BGR image array containing one or more faces
+            global_id: Optional UUID string for the identity. If None, one is generated.
+            loop: Optional event loop to use for async DB operations.
 
         Returns:
             UUID string (global_id) for the enrolled identity
@@ -192,7 +202,7 @@ class FaceRecognizer:
             ValueError: If no face detected in image
             RuntimeError: If insightface not installed
 
-        Spawns daemon thread to persist embedding to database asynchronously.
+        Spawns daemon thread to persist embedding to database and save snapshot asynchronously.
         """
         if self._app is None:
             raise RuntimeError("insightface not installed")
@@ -210,22 +220,44 @@ class FaceRecognizer:
         best_face = max(faces, key=lambda f: f.det_score)
         embedding = best_face.normed_embedding.astype(np.float32)
 
-        # Generate UUID for this identity
-        global_id = str(uuid.uuid4())
+        # Extract bbox for cropping
+        x1, y1, x2, y2 = best_face.bbox
+        h, w = face_image.shape[:2]
+        # Pad crop slightly
+        pad = int(0.1 * max(y2-y1, x2-x1))
+        x1_p, y1_p = max(0, int(x1-pad)), max(0, int(y1-pad))
+        x2_p, y2_p = min(w, int(x2+pad)), min(h, int(y2+pad))
+        face_crop = face_image[y1_p:y2_p, x1_p:x2_p]
+
+        # Generate UUID for this identity if not provided
+        if global_id is None:
+            global_id = str(uuid.uuid4())
 
         # Store in memory with lock
         with self._lock:
             self.known_embeddings[global_id] = (name, embedding)
 
-        # Persist to database in background daemon thread
+        # Persist to database and save snapshot in background daemon thread
         def _persist_to_db() -> None:
             try:
-                from engine.storage.db import upsert_identity
+                # 1. Save snapshot
+                from pathlib import Path
+                snap_dir = Path(settings.snapshots_dir) / "identities"
+                snap_dir.mkdir(parents=True, exist_ok=True)
+                snap_path = str(snap_dir / f"{global_id}.jpg")
+                cv2.imwrite(snap_path, face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-                asyncio.run(upsert_identity(global_id, name, embedding.tobytes()))
-                logger.info("Enrolled identity: global_id=%s, name=%s", global_id, name)
+                # 2. Persist to DB
+                from engine.storage.db import upsert_identity
+                nonlocal loop
+                _loop = loop or asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(
+                    upsert_identity(global_id, name, embedding.tobytes()), _loop
+                )
+                future.result(timeout=10)
+                logger.info("Enrolled identity: global_id=%s, name=%s, snapshot=%s", global_id, name, snap_path)
             except Exception as e:
-                logger.error("Failed to persist enrollment to database: %s", e)
+                logger.error("Failed to persist enrollment: %s", e)
 
         thread = threading.Thread(target=_persist_to_db, daemon=True)
         thread.start()

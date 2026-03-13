@@ -51,24 +51,25 @@ async def post_webhook(alert: Alert) -> None:
             response.raise_for_status()
 
         logger.debug(
-            f"Webhook POST successful: {settings.alert_webhook_url}, "
-            f"alert_id={alert.alert_id}, status={response.status_code}"
+            "Webhook POST successful: %s, alert_id=%s, status=%s",
+            settings.alert_webhook_url, alert.alert_id, response.status_code
         )
 
     except httpx.TimeoutException:
         logger.error(
-            f"Webhook POST timeout (5s): {settings.alert_webhook_url}, "
-            f"alert_id={alert.alert_id}"
+            "Webhook POST timeout (5s): %s, alert_id=%s",
+            settings.alert_webhook_url, alert.alert_id
         )
     except httpx.HTTPError as e:
         logger.error(
-            f"Webhook HTTP error: {settings.alert_webhook_url}, "
-            f"alert_id={alert.alert_id}, error={e}",
+            "Webhook HTTP error: %s, alert_id=%s, error=%s",
+            settings.alert_webhook_url, alert.alert_id, e,
             exc_info=True,
         )
     except Exception as e:
         logger.error(
-            f"Webhook POST failed unexpectedly: alert_id={alert.alert_id}, error={e}",
+            "Webhook POST failed unexpectedly: alert_id=%s, error=%s",
+            alert.alert_id, e,
             exc_info=True,
         )
 

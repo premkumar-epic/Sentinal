@@ -1,39 +1,46 @@
-import { useState, useEffect } from 'react'
-import { API_BASE } from '../store/useStore'
+import { useState, useEffect, useCallback } from 'react'
+import { Bell, Mail, Webhook, Save, Send, ShieldCheck, ShieldAlert, CheckCircle2, AlertTriangle, Settings, MessageCircle } from 'lucide-react'
+import useStore from '../store/useStore'
 
 export default function Alerts() {
+  const fetchAlertConfigStore = useStore((s) => s.fetchAlertConfig)
+  const updateAlertConfigStore = useStore((s) => s.updateAlertConfig)
+  const testAlertStore = useStore((s) => s.testAlert)
+
   const [config, setConfig] = useState({
-    alert_email_enabled: false,
-    alert_email_smtp_host: '',
-    alert_email_smtp_port: 587,
-    alert_email_sender: '',
-    alert_email_recipient: '',
-    alert_email_password: '',
-    alert_webhook_enabled: false,
-    alert_webhook_url: '',
+    email_enabled: false,
+    email_smtp_host: '',
+    email_smtp_port: 587,
+    email_sender: '',
+    email_recipient: '',
+    email_password: '',
+    webhook_enabled: false,
+    webhook_url: '',
+    telegram_enabled: false,
+    telegram_bot_token: '',
+    telegram_chat_id: '',
   })
 
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Load config on mount
-  useEffect(() => {
-    fetchConfig()
-  }, [])
-
-  const fetchConfig = async () => {
+  const fetchConfig = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/alerts/config`)
-      if (res.ok) {
-        setConfig(await res.json())
+      const data = await fetchAlertConfigStore()
+      if (data) {
+        setConfig(data)
       }
     } catch (err) {
-      console.error('Failed to fetch alert config:', err)
+      console.error('Config synchronization failure:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [fetchAlertConfigStore])
+
+  useEffect(() => {
+    fetchConfig()
+  }, [fetchConfig])
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -47,20 +54,16 @@ export default function Alerts() {
     e.preventDefault()
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/alerts/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      })
-      if (res.ok) {
-        setStatus('✓ Config saved successfully')
+      const success = await updateAlertConfigStore(config)
+      if (success) {
+        setStatus('PROTOCOL UPDATED: CONFIGURATION PERSISTED')
         setTimeout(() => setStatus(''), 3000)
       } else {
-        setStatus('✗ Failed to save config')
+        setStatus('FAULT: UPDATE REJECTED BY SERVER')
       }
     } catch (err) {
-      console.error('Failed to save config:', err)
-      setStatus('✗ Error saving config')
+      console.error('Save failure:', err)
+      setStatus('CRITICAL FAULT: IO ERROR')
     } finally {
       setLoading(false)
     }
@@ -69,126 +72,135 @@ export default function Alerts() {
   const handleTest = async (channel) => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/alerts/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel }),
-      })
-      if (res.ok) {
-        const result = await res.json()
-        if (channel === 'email') {
-          setStatus(`✓ Test email sent to ${result.email}`)
-        } else if (channel === 'webhook') {
-          setStatus(`✓ Webhook test sent to ${result.webhook}`)
-        }
+      const success = await testAlertStore(channel)
+      if (success) {
+        setStatus(`DIAGNOSTIC COMPLETE: ${channel.toUpperCase()} DISPATCHED`)
       } else {
-        setStatus(`✗ Test failed for ${channel}`)
+        setStatus(`DIAGNOSTIC FAILURE: ${channel.toUpperCase()} FAULT`)
       }
       setTimeout(() => setStatus(''), 4000)
     } catch (err) {
-      console.error(`Failed to test ${channel}:`, err)
-      setStatus(`✗ Error testing ${channel}`)
+      console.error(`Diagnostic failure for ${channel}:`, err)
+      setStatus(`CRITICAL FAULT: ${channel.toUpperCase()} UNREACHABLE`)
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading && !config.alert_email_enabled) {
-    return <div style={s.root}><p style={s.dim}>Loading...</p></div>
+  if (loading && !config.email_smtp_host) {
+    return (
+      <div style={s.root}>
+        <div style={s.loadingBox}>
+          <Settings size={32} style={s.spin} />
+          <p>INITIALIZING CONFIGURATION INTERFACE...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div style={s.root}>
-      <h2 style={s.title}>Alert Configuration</h2>
+      <header style={s.header}>
+        <div>
+          <h2 style={s.title}>Dispatch Protocols</h2>
+          <p style={s.subtitle}>Configure automated threat notification and external integrations</p>
+        </div>
+      </header>
 
       {status && (
-        <div
-          style={{
-            ...s.status,
-            background: status.startsWith('✓') ? '#1a3a1a' : '#3a1a1a',
-            color: status.startsWith('✓') ? '#00ff00' : '#ff6666',
-          }}
-        >
+        <div style={{
+          ...s.statusBanner,
+          backgroundColor: status.includes('FAULT') ? 'rgba(244, 63, 94, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+          borderColor: status.includes('FAULT') ? 'var(--status-danger)' : 'var(--status-success)',
+          color: status.includes('FAULT') ? 'var(--status-danger)' : 'var(--status-success)',
+        }}>
+          {status.includes('FAULT') ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           {status}
         </div>
       )}
 
-      <form onSubmit={handleSave} style={s.form}>
-        {/* Email Section */}
-        <fieldset style={s.fieldset}>
-          <legend style={s.legend}>Email Alerts</legend>
-
-          <div style={s.formRow}>
-            <label style={s.label}>
-              <input
-                type="checkbox"
-                name="alert_email_enabled"
-                checked={config.alert_email_enabled}
-                onChange={handleInputChange}
-                style={s.checkbox}
-              />
-              Enable email alerts
-            </label>
-          </div>
-
-          {config.alert_email_enabled && (
-            <>
-              <div style={s.formRow}>
-                <label style={s.label}>SMTP Host</label>
+      <form onSubmit={handleSave} style={s.formLayout}>
+        <div style={s.mainContent}>
+          {/* Email Channel */}
+          <section style={{ ...s.module, borderColor: config.email_enabled ? 'var(--status-success)' : 'var(--glass-border)' }}>
+            <div style={s.moduleHeader}>
+              <div style={s.moduleIcon}><Mail size={20} color={config.email_enabled ? 'var(--status-success)' : 'var(--text-dim)'} /></div>
+              <div style={{ flex: 1 }}>
+                <h3 style={s.moduleTitle}>SMTP DISPATCH</h3>
+                <p style={s.moduleDesc}>Automated email reports with threat snapshots</p>
+              </div>
+              <label style={s.switch}>
                 <input
-                  type="text"
-                  name="alert_email_smtp_host"
-                  value={config.alert_email_smtp_host}
+                  type="checkbox"
+                  name="email_enabled"
+                  checked={config.email_enabled}
                   onChange={handleInputChange}
-                  placeholder="smtp.gmail.com"
-                  style={s.input}
+                  style={{ display: 'none' }}
                 />
+                <div style={{ ...s.switchKnob, background: config.email_enabled ? 'var(--status-success)' : 'var(--text-dim)' }}>
+                  {config.email_enabled ? 'ACTIVE' : 'OFF'}
+                </div>
+              </label>
+            </div>
+
+            <div style={{ ...s.moduleBody, opacity: config.email_enabled ? 1 : 0.4, pointerEvents: config.email_enabled ? 'auto' : 'none' }}>
+              <div style={s.fieldGrid}>
+                <div style={s.inputGroup}>
+                  <label style={s.label}>SMTP SERVER</label>
+                  <input
+                    type="text"
+                    name="email_smtp_host"
+                    value={config.email_smtp_host}
+                    onChange={handleInputChange}
+                    placeholder="smtp.provider.com"
+                    style={s.input}
+                  />
+                </div>
+                <div style={s.inputGroup}>
+                  <label style={s.label}>PORT</label>
+                  <input
+                    type="number"
+                    name="email_smtp_port"
+                    value={config.email_smtp_port}
+                    onChange={handleInputChange}
+                    placeholder="587"
+                    style={s.input}
+                  />
+                </div>
               </div>
 
-              <div style={s.formRow}>
-                <label style={s.label}>SMTP Port</label>
-                <input
-                  type="number"
-                  name="alert_email_smtp_port"
-                  value={config.alert_email_smtp_port}
-                  onChange={handleInputChange}
-                  placeholder="587"
-                  style={s.input}
-                />
-              </div>
-
-              <div style={s.formRow}>
-                <label style={s.label}>Sender Email</label>
-                <input
-                  type="email"
-                  name="alert_email_sender"
-                  value={config.alert_email_sender}
-                  onChange={handleInputChange}
-                  placeholder="your-email@gmail.com"
-                  style={s.input}
-                />
-              </div>
-
-              <div style={s.formRow}>
-                <label style={s.label}>Recipient Email</label>
+              <div style={s.inputGroup}>
+                <label style={s.label}>ORIGIN ADDRESS</label>
                 <input
                   type="email"
-                  name="alert_email_recipient"
-                  value={config.alert_email_recipient}
+                  name="email_sender"
+                  value={config.email_sender}
                   onChange={handleInputChange}
-                  placeholder="alert@example.com"
+                  placeholder="sentinal-core@system.internal"
                   style={s.input}
                 />
               </div>
 
-              <div style={s.formRow}>
-                <label style={s.label}>Password</label>
+              <div style={s.inputGroup}>
+                <label style={s.label}>TARGET RECIPIENT</label>
+                <input
+                  type="email"
+                  name="email_recipient"
+                  value={config.email_recipient}
+                  onChange={handleInputChange}
+                  placeholder="security-head@org.com"
+                  style={s.input}
+                />
+              </div>
+
+              <div style={s.inputGroup}>
+                <label style={s.label}>AUTHORIZATION TOKEN / PASSWORD</label>
                 <input
                   type="password"
-                  name="alert_email_password"
-                  value={config.alert_email_password}
+                  name="email_password"
+                  value={config.email_password}
                   onChange={handleInputChange}
-                  placeholder="••••••••"
+                  placeholder="••••••••••••••••"
                   style={s.input}
                 />
               </div>
@@ -197,40 +209,44 @@ export default function Alerts() {
                 type="button"
                 style={s.testBtn}
                 onClick={() => handleTest('email')}
+                disabled={!config.email_enabled}
               >
-                Test Email
+                <Send size={14} /> RUN SMTP DIAGNOSTIC
               </button>
-            </>
-          )}
-        </fieldset>
+            </div>
+          </section>
 
-        {/* Webhook Section */}
-        <fieldset style={s.fieldset}>
-          <legend style={s.legend}>Webhook Alerts</legend>
+          {/* Webhook Channel */}
+          <section style={{ ...s.module, borderColor: config.webhook_enabled ? 'var(--status-success)' : 'var(--glass-border)' }}>
+            <div style={s.moduleHeader}>
+              <div style={s.moduleIcon}><Webhook size={20} color={config.webhook_enabled ? 'var(--status-success)' : 'var(--text-dim)'} /></div>
+              <div style={{ flex: 1 }}>
+                <h3 style={s.moduleTitle}>WEBHOOK INTEGRATION</h3>
+                <p style={s.moduleDesc}>Real-time JSON payloads for external security systems</p>
+              </div>
+              <label style={s.switch}>
+                <input
+                  type="checkbox"
+                  name="webhook_enabled"
+                  checked={config.webhook_enabled}
+                  onChange={handleInputChange}
+                  style={{ display: 'none' }}
+                />
+                <div style={{ ...s.switchKnob, background: config.webhook_enabled ? 'var(--status-success)' : 'var(--text-dim)' }}>
+                  {config.webhook_enabled ? 'ACTIVE' : 'OFF'}
+                </div>
+              </label>
+            </div>
 
-          <div style={s.formRow}>
-            <label style={s.label}>
-              <input
-                type="checkbox"
-                name="alert_webhook_enabled"
-                checked={config.alert_webhook_enabled}
-                onChange={handleInputChange}
-                style={s.checkbox}
-              />
-              Enable webhook alerts
-            </label>
-          </div>
-
-          {config.alert_webhook_enabled && (
-            <>
-              <div style={s.formRow}>
-                <label style={s.label}>Webhook URL</label>
+            <div style={{ ...s.moduleBody, opacity: config.webhook_enabled ? 1 : 0.4, pointerEvents: config.webhook_enabled ? 'auto' : 'none' }}>
+              <div style={s.inputGroup}>
+                <label style={s.label}>ENDPOINT URL</label>
                 <input
                   type="url"
-                  name="alert_webhook_url"
-                  value={config.alert_webhook_url}
+                  name="webhook_url"
+                  value={config.webhook_url}
                   onChange={handleInputChange}
-                  placeholder="https://example.com/webhook"
+                  placeholder="https://api.security-corp.com/v1/alerts"
                   style={s.input}
                 />
               </div>
@@ -239,107 +255,177 @@ export default function Alerts() {
                 type="button"
                 style={s.testBtn}
                 onClick={() => handleTest('webhook')}
+                disabled={!config.webhook_enabled}
               >
-                Test Webhook
+                <Send size={14} /> RUN WEBHOOK DIAGNOSTIC
               </button>
-            </>
-          )}
-        </fieldset>
+            </div>
+          </section>
 
-        {/* Save Button */}
-        <div style={s.actions}>
-          <button type="submit" style={s.btn}>
-            Save Configuration
-          </button>
+          {/* Telegram Channel */}
+          <section style={{ ...s.module, borderColor: config.telegram_enabled ? 'var(--status-success)' : 'var(--glass-border)' }}>
+            <div style={s.moduleHeader}>
+              <div style={s.moduleIcon}><MessageCircle size={20} color={config.telegram_enabled ? 'var(--status-success)' : 'var(--text-dim)'} /></div>
+              <div style={{ flex: 1 }}>
+                <h3 style={s.moduleTitle}>TELEGRAM BOT</h3>
+                <p style={s.moduleDesc}>Instant mobile alerts with threat snapshots via Telegram</p>
+              </div>
+              <label style={s.switch}>
+                <input
+                  type="checkbox"
+                  name="telegram_enabled"
+                  checked={config.telegram_enabled}
+                  onChange={handleInputChange}
+                  style={{ display: 'none' }}
+                />
+                <div style={{ ...s.switchKnob, background: config.telegram_enabled ? 'var(--status-success)' : 'var(--text-dim)' }}>
+                  {config.telegram_enabled ? 'ACTIVE' : 'OFF'}
+                </div>
+              </label>
+            </div>
+
+            <div style={{ ...s.moduleBody, opacity: config.telegram_enabled ? 1 : 0.4, pointerEvents: config.telegram_enabled ? 'auto' : 'none' }}>
+              <div style={s.inputGroup}>
+                <label style={s.label}>BOT TOKEN</label>
+                <input
+                  type="password"
+                  name="telegram_bot_token"
+                  value={config.telegram_bot_token}
+                  onChange={handleInputChange}
+                  placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
+                  style={s.input}
+                />
+                <span style={s.hint}>Get from @BotFather on Telegram</span>
+              </div>
+
+              <div style={s.inputGroup}>
+                <label style={s.label}>CHAT ID</label>
+                <input
+                  type="text"
+                  name="telegram_chat_id"
+                  value={config.telegram_chat_id}
+                  onChange={handleInputChange}
+                  placeholder="-1001234567890"
+                  style={s.input}
+                />
+                <span style={s.hint}>User, group, or channel ID — get from @userinfobot</span>
+              </div>
+
+              <button
+                type="button"
+                style={s.testBtn}
+                onClick={() => handleTest('telegram')}
+                disabled={!config.telegram_enabled}
+              >
+                <Send size={14} /> RUN TELEGRAM DIAGNOSTIC
+              </button>
+            </div>
+          </section>
         </div>
+
+        {/* Action Sidebar */}
+        <aside style={s.sidebar}>
+          <div style={s.actionCard}>
+            <h4 style={s.sideTitle}><ShieldCheck size={14} /> PERSISTENCE</h4>
+            <p style={s.sideText}>Configuration changes are applied immediately to the AI engine but must be saved to survive system restarts.</p>
+            <button type="submit" style={s.saveBtn} disabled={loading}>
+              <Save size={16} /> 
+              {loading ? 'SYNCHRONIZING...' : 'COMMIT PROTOCOLS'}
+            </button>
+          </div>
+
+          <div style={s.actionCard}>
+            <h4 style={s.sideTitle}><ShieldAlert size={14} /> ALERT LOGIC</h4>
+            <div style={s.logicPill}>WEAPONS: 0s COOLDOWN</div>
+            <div style={s.logicPill}>INTRUSION: 60s COOLDOWN</div>
+            <div style={s.logicPill}>FACE MATCH: 300s COOLDOWN</div>
+          </div>
+        </aside>
       </form>
     </div>
   )
 }
 
 const s = {
-  root: {
-    padding: '16px',
-    background: '#0d0d0d',
-    minHeight: '100vh',
-    color: '#e0e0e0',
-    fontFamily: 'monospace',
+  root: { display: 'flex', flexDirection: 'column', gap: '32px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' },
+  subtitle: { margin: '6px 0 0', fontSize: '0.95rem', color: 'var(--text-sub)' },
+  
+  statusBanner: { 
+    display: 'flex', alignItems: 'center', gap: '12px', padding: '16px 24px', 
+    borderRadius: 'var(--radius-md)', border: '1px solid', 
+    fontSize: '0.85rem', fontWeight: 800, letterSpacing: '0.05em' 
   },
-  title: {
-    margin: '0 0 20px',
-    color: '#00e5ff',
-    fontSize: '1.3rem',
+
+  formLayout: { display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px' },
+  mainContent: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  
+  module: { 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    borderRadius: 'var(--radius-lg)', padding: '32px', transition: 'border-color 0.3s',
+    boxShadow: 'var(--shadow-md)'
   },
-  status: {
-    padding: '12px 16px',
-    borderRadius: '4px',
-    marginBottom: '16px',
-    fontSize: '0.9rem',
-    border: '1px solid rgba(255,255,255,0.2)',
+  moduleHeader: { display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '32px' },
+  moduleIcon: { 
+    width: '48px', height: '48px', borderRadius: 'var(--radius-md)', 
+    background: 'var(--bg-surface-raised)', display: 'flex', 
+    alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-bright)' 
   },
-  form: {
-    maxWidth: '600px',
+  moduleTitle: { margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '0.05em' },
+  moduleDesc: { margin: '6px 0 0', fontSize: '0.8rem', color: 'var(--text-dim)' },
+  
+  switch: { cursor: 'pointer' },
+  switchKnob: { 
+    padding: '6px 16px', borderRadius: '20px', fontSize: '0.65rem', 
+    fontWeight: 900, color: '#fff', transition: 'all 0.3s', letterSpacing: '0.05em'
   },
-  fieldset: {
-    border: '1px solid #333',
-    borderRadius: '6px',
-    padding: '16px',
-    marginBottom: '20px',
-    background: '#1a1a1a',
+
+  moduleBody: { display: 'flex', flexDirection: 'column', gap: '24px', transition: 'opacity 0.3s' },
+  fieldGrid: { display: 'grid', gridTemplateColumns: '1fr 140px', gap: '20px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  label: { fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '0.05em' },
+  input: { 
+    width: '100%', background: 'var(--bg-app)', border: '1px solid var(--border-base)', 
+    color: 'var(--text-main)', padding: '14px', borderRadius: 'var(--radius-md)', 
+    fontSize: '0.9rem', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s'
   },
-  legend: {
-    color: '#00e5ff',
-    fontSize: '1rem',
-    fontWeight: 'bold',
-    padding: '0 8px',
-  },
-  formRow: {
-    marginBottom: '12px',
-  },
-  label: {
-    display: 'block',
-    color: '#aaa',
-    fontSize: '0.85rem',
-    marginBottom: '4px',
-  },
-  checkbox: {
-    marginRight: '6px',
-  },
-  input: {
-    width: '100%',
-    padding: '8px',
-    background: '#0d0d0d',
-    border: '1px solid #444',
-    borderRadius: '3px',
-    color: '#e0e0e0',
-    fontSize: '0.85rem',
-    boxSizing: 'border-box',
-  },
-  btn: {
-    padding: '8px 20px',
-    background: '#00e5ff',
-    color: '#000',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '0.85rem',
-    fontWeight: 'bold',
-  },
+  
+  hint: { fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 500, marginTop: '-4px' },
   testBtn: {
-    padding: '6px 12px',
-    background: '#666',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '0.8rem',
-    marginTop: '8px',
+    alignSelf: 'flex-start', background: 'var(--bg-app)', 
+    border: '1px solid var(--border-bright)', color: 'var(--text-main)', 
+    padding: '12px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', 
+    fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', 
+    gap: '8px', transition: 'all 0.2s' 
   },
-  actions: {
-    display: 'flex',
-    gap: '12px',
+
+  sidebar: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  actionCard: { 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    borderRadius: 'var(--radius-lg)', padding: '24px', 
+    boxShadow: 'var(--shadow-md)' 
   },
-  dim: {
-    color: '#555',
+  sideTitle: { 
+    margin: '0 0 16px', fontSize: '0.8rem', fontWeight: 800, 
+    color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '0.05em',
+    display: 'flex', alignItems: 'center', gap: '8px'
   },
+  sideText: { fontSize: '0.8rem', color: 'var(--text-dim)', lineHeight: '1.6', marginBottom: '24px' },
+  saveBtn: { 
+    width: '100%', background: 'var(--accent-primary)', color: '#fff', 
+    border: 'none', padding: '16px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', fontSize: '0.9rem', fontWeight: 800, 
+    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+    gap: '10px', boxShadow: '0 4px 12px var(--accent-soft)', transition: 'all 0.2s'
+  },
+  logicPill: { 
+    padding: '10px 16px', background: 'var(--bg-app)', 
+    border: '1px solid var(--border-base)', borderRadius: 'var(--radius-sm)', 
+    fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', 
+    marginBottom: '10px', letterSpacing: '0.05em' 
+  },
+
+  loadingBox: { height: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', color: 'var(--text-dim)', letterSpacing: '2px', fontSize: '0.85rem', fontWeight: 600 },
+  spin: { animation: 'spin 2s linear infinite' }
 }

@@ -1,14 +1,52 @@
+# Environment & secrets
 .env
-models/
-data/snapshots/
-data/logs/
-data/*.db
-data/cameras.json
+.env.*
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
 .venv/
 venv/
+
+# Models (large binaries)
+models/
+
+# Runtime data
+data/*
+!data/zones.json
+!data/modules.json
+
+# Node / Frontend build
 node_modules/
+dashboard/node_modules/
 dashboard/dist/
-*.egg-info/
+
+# Logs & temp output
+*.log
+backend.log
+backend_current.log
+test_results*.txt
+sentinal_events.csv
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Temp / audit / planning docs (not source code)
+.orchestration-protocol.tmp.md
+plans/
+sentinal_v2_audit*.md
+CODEBASE_REPORT.md
+system_architecture.md
+walkthrough.md
+Screenshot.png
+
+# Claude internal
+.claude/

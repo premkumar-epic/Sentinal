@@ -1,39 +1,39 @@
-import { User } from 'lucide-react'
+import React from 'react';
+import { User, ShieldCheck } from 'lucide-react';
 
-export default function PersonBadge({ name, globalId, sightingCount, lastCam }) {
-  const displayName = name || `Unknown #${globalId?.slice(0, 6) || '?'}`
+const PersonBadge = ({ name, globalId, enrolled }) => {
+  const s = {
+    badge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '6px',
+      padding: '4px 10px',
+      background: enrolled ? 'rgba(16, 185, 129, 0.1)' : 'var(--glass-bg)',
+      border: `1px solid ${enrolled ? 'rgba(16, 185, 129, 0.3)' : 'var(--glass-border)'}`,
+      borderRadius: 'var(--radius-sm)',
+      color: enrolled ? 'var(--status-success)' : 'var(--text-primary)',
+      fontSize: '0.7rem',
+      fontWeight: 700,
+      letterSpacing: '0.5px',
+      transition: 'all 0.2s',
+    },
+    icon: {
+      flexShrink: 0,
+    },
+    label: {
+      maxWidth: '120px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    }
+  };
 
   return (
     <div style={s.badge}>
-      <User size={14} style={{ marginRight: '4px' }} />
-      <span style={s.name}>{displayName}</span>
-      {sightingCount > 0 && (
-        <span style={s.meta}>· {sightingCount} sighting{sightingCount !== 1 ? 's' : ''}</span>
-      )}
-      {lastCam && (
-        <span style={s.meta}>· {lastCam}</span>
-      )}
+      {enrolled ? <ShieldCheck size={12} style={s.icon} /> : <User size={12} style={s.icon} />}
+      <span style={s.label}>{name || `SUBJECT_${globalId?.slice(0, 6).toUpperCase()}`}</span>
     </div>
-  )
-}
+  );
+};
 
-const s = {
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    background: '#2a2a2a',
-    border: '1px solid #444',
-    borderRadius: '12px',
-    padding: '2px 8px',
-    fontSize: '0.75rem',
-    color: '#e0e0e0',
-    whiteSpace: 'nowrap',
-    gap: '4px',
-  },
-  name: {
-    fontWeight: '500',
-  },
-  meta: {
-    color: '#999',
-  },
-}
+export default PersonBadge;

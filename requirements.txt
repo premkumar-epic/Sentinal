@@ -31,4 +31,6 @@ psycopg2-binary>=2.9.0      # sync PostgreSQL fallback
 
 # Phase 6 — Auth & Testing
 python-jose[cryptography]   # JWT token generation and validation
+passlib[bcrypt]             # secure password hashing
+slowapi                     # rate limiting for auth endpoints
 pytest-asyncio              # async pytest support for API integration tests

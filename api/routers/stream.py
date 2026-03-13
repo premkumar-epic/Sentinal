@@ -8,8 +8,10 @@ GET /api/stream/{cam_id}
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from api.middleware.auth import get_current_user_from_query
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +19,12 @@ router = APIRouter()
 
 
 @router.get("/stream/{cam_id}")
-async def mjpeg_stream(cam_id: str) -> StreamingResponse:
+async def mjpeg_stream(cam_id: str, _user: str = Depends(get_current_user_from_query)) -> StreamingResponse:
     """
     Stream live MJPEG frames for a given camera.
 
     The browser can consume this directly via:
-        <img src="/api/stream/{cam_id}" />
+        <img src="/api/stream/{cam_id}?token={JWT}" />
     """
     from api.services.camera_service import camera_service  # lazy to avoid circular import
 

@@ -1,189 +1,175 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { Shield, Plus, X, Trash2, Camera, Info } from 'lucide-react'
 import useStore, { API_BASE } from '../store/useStore'
+import ZoneEditor from '../components/ZoneEditor'
+
+const s = {
+  root: { display: 'flex', flexDirection: 'column', gap: '32px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' },
+  subtitle: { margin: '6px 0 0', fontSize: '0.95rem', color: 'var(--text-sub)' },
+
+  mainGrid: { display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px', minHeight: '600px' },
+
+  editorCard: {
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)',
+    borderRadius: 'var(--radius-lg)', padding: '32px', display: 'flex',
+    flexDirection: 'column', gap: '24px', boxShadow: 'var(--shadow-md)'
+  },
+
+  toolbar: { display: 'flex', gap: '16px', alignItems: 'center' },
+  select: {
+    padding: '12px 16px', background: 'var(--bg-app)',
+    border: '1px solid var(--border-base)', color: 'var(--text-main)',
+    borderRadius: 'var(--radius-md)', fontSize: '0.85rem', outline: 'none',
+    transition: 'border-color 0.2s', fontWeight: 500
+  },
+  btn: {
+    padding: '12px 24px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+    fontSize: '0.85rem', fontWeight: 700, border: 'none',
+    display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s'
+  },
+  btnDraw: { background: 'var(--accent-primary)', color: '#fff', boxShadow: '0 4px 12px var(--accent-soft)' },
+  btnCancel: { background: 'rgba(244, 63, 94, 0.1)', color: 'var(--status-danger)', border: '1px solid rgba(244, 63, 94, 0.2)' },
+
+  canvasContainer: {
+    position: 'relative', border: '1px solid var(--border-base)',
+    borderRadius: 'var(--radius-md)', overflow: 'hidden', background: '#000',
+    flex: 1, boxShadow: 'inset 0 0 40px rgba(0,0,0,0.5)'
+  },
+  feed: { width: '100%', height: '100%', display: 'block', objectFit: 'contain' },
+  svg: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
+
+  sidebar: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  sideCard: {
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)',
+    borderRadius: 'var(--radius-lg)', padding: '24px',
+    boxShadow: 'var(--shadow-md)'
+  },
+  sideTitle: {
+    margin: '0 0 20px', fontSize: '0.8rem', fontWeight: 800,
+    color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '0.05em',
+    display: 'flex', alignItems: 'center', gap: '8px'
+  },
+
+  zoneList: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  zoneItem: {
+    background: 'var(--bg-app)', border: '1px solid var(--border-base)',
+    borderRadius: 'var(--radius-md)', padding: '16px', transition: 'all 0.2s'
+  },
+  zoneHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' },
+  colorSwatch: { width: '14px', height: '14px', borderRadius: '50%', border: '1px solid var(--border-bright)' },
+  zoneLabel: { fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)', flex: 1 },
+
+  zoneActions: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-bright)', paddingTop: '12px' },
+  activeToggle: {
+    display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem',
+    fontWeight: 700, cursor: 'pointer', color: 'var(--text-sub)'
+  },
+  deleteBtn: {
+    background: 'transparent', border: 'none', color: 'var(--text-dim)',
+    cursor: 'pointer', padding: '6px', borderRadius: '4px', transition: 'color 0.2s'
+  },
+
+  empty: { textAlign: 'center', padding: '60px 20px', color: 'var(--text-dim)', fontSize: '0.85rem', fontWeight: 500, letterSpacing: '0.05em' }
+}
 
 export default function Zones() {
+  const token = useStore((s) => s.token)
   const cameras = useStore((s) => s.cameras)
   const fetchCameras = useStore((s) => s.fetchCameras)
+  const fetchZonesStore = useStore((s) => s.fetchZones)
+  const addZoneStore = useStore((s) => s.addZone)
+  const updateZoneStore = useStore((s) => s.updateZone)
+  const deleteZoneStore = useStore((s) => s.deleteZone)
 
   const [selectedCam, setSelectedCam] = useState('')
   const [zones, setZones] = useState([])
-  const [drawingMode, setDrawingMode] = useState(false)
-  const [currentPoints, setCurrentPoints] = useState([])
-  const [newZoneColor, setNewZoneColor] = useState('#FF0000')
-  const [loading, setLoading] = useState(false)
-  const [lastDoubleClickTime, setLastDoubleClickTime] = useState(0)
+  const [showEditor, setShowEditor] = useState(false)
 
-  const imgRef = useRef(null)
+  const fetchZones = useCallback(async () => {
+    if (selectedCam) {
+      const data = await fetchZonesStore(selectedCam)
+      setZones(data || [])
+    }
+  }, [selectedCam, fetchZonesStore])
 
-  // Fetch cameras on mount
   useEffect(() => {
     fetchCameras()
   }, [fetchCameras])
 
-  // When cameras load, select first one
   useEffect(() => {
     if (cameras.length > 0 && !selectedCam) {
       setSelectedCam(cameras[0].cam_id)
     }
   }, [cameras, selectedCam])
 
-  // Fetch zones when camera changes
   useEffect(() => {
-    if (selectedCam) {
-      fetchZones()
-    }
-  }, [selectedCam])
+    fetchZones()
+  }, [fetchZones])
 
-  const fetchZones = async () => {
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/zones?cam_id=${selectedCam}`
-      )
-      if (res.ok) {
-        setZones(await res.json())
-      }
-    } catch (e) {
-      console.error('Failed to fetch zones:', e)
-    }
-  }
-
-  // Compute centroid of polygon for label placement
   const computeCentroid = (polygon) => {
-    if (polygon.length === 0) return [0, 0]
+    if (!polygon || polygon.length === 0) return [0, 0]
     const x = polygon.reduce((sum, p) => sum + p[0], 0) / polygon.length
     const y = polygon.reduce((sum, p) => sum + p[1], 0) / polygon.length
     return [x, y]
   }
 
-  const handleSvgClick = (e) => {
-    // Ignore clicks within 300ms of a dblclick
-    if (Date.now() - lastDoubleClickTime < 300) {
-      return
-    }
-
-    if (!drawingMode || !imgRef.current) return
-
-    const rect = imgRef.current.getBoundingClientRect()
-    const x = Math.round(e.clientX - rect.left)
-    const y = Math.round(e.clientY - rect.top)
-
-    setCurrentPoints([...currentPoints, [x, y]])
-  }
-
-  const handleSvgDoubleClick = (e) => {
-    if (!drawingMode || currentPoints.length < 3) {
-      setLastDoubleClickTime(Date.now())
-      return
-    }
-
-    setLastDoubleClickTime(Date.now())
-
-    const label = window.prompt('Zone label:', 'Restricted Area')
-    if (!label || label.trim() === '') {
-      return
-    }
-
-    saveZone(label.trim())
-  }
-
-  const saveZone = async (label) => {
-    if (!selectedCam || currentPoints.length < 3) {
-      alert('Need at least 3 points to create a zone')
-      return
-    }
-
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/zones`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label,
-          cam_id: selectedCam,
-          polygon: currentPoints,
-          color: newZoneColor,
-        }),
-      })
-
-      if (res.ok) {
-        setCurrentPoints([])
-        setDrawingMode(false)
-        await fetchZones()
-      } else {
-        alert('Failed to create zone')
-      }
-    } catch (e) {
-      console.error('Failed to save zone:', e)
-      alert('Error creating zone')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const toggleZoneActive = async (zoneId, currentActive) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/zones/${zoneId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: !currentActive }),
-      })
-
-      if (res.ok) {
-        await fetchZones()
-      }
-    } catch (e) {
-      console.error('Failed to toggle zone:', e)
-    }
+    const success = await updateZoneStore(zoneId, { active: !currentActive })
+    if (success) fetchZones()
   }
 
   const deleteZone = async (zoneId) => {
-    if (!window.confirm('Delete this zone?')) return
+    if (!window.confirm('PERMANENT ACTION: Delete this detection zone?')) return
+    const success = await deleteZoneStore(zoneId)
+    if (success) fetchZones()
+  }
 
-    try {
-      const res = await fetch(`${API_BASE}/api/zones/${zoneId}`, {
-        method: 'DELETE',
-      })
-
-      if (res.ok) {
-        await fetchZones()
-      }
-    } catch (e) {
-      console.error('Failed to delete zone:', e)
+  const handleEditorSave = async (zoneData) => {
+    const success = await addZoneStore({
+      ...zoneData,
+      cam_id: selectedCam,
+    })
+    if (success) {
+      setShowEditor(false)
+      fetchZones()
+    } else {
+      alert('Initialization error. Zone registry rejected the payload.')
     }
   }
 
-  const pointsString = currentPoints
-    .map((p) => `${p[0]},${p[1]}`)
-    .join(' ')
-
   if (cameras.length === 0) {
     return (
-      <div className="w-full h-screen bg-gray-900 flex items-center justify-center text-gray-100">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-2">No Cameras</h2>
-          <p className="text-gray-400">Register cameras to create zones.</p>
-        </div>
+      <div style={s.root}>
+        <div style={s.empty}>NO NODES AVAILABLE. REGISTER A CAMERA TO DEFINE DETECTION ZONES.</div>
       </div>
     )
   }
 
   return (
-    <div className="w-full min-h-screen bg-gray-900 p-6 text-gray-100">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-4">Zone Editor</h1>
+    <div style={s.root}>
+      <header style={s.header}>
+        <div>
+          <h2 style={s.title}>Boundary Definition</h2>
+          <p style={s.subtitle}>Configure spatial logic and alert parameters for system nodes</p>
+        </div>
+      </header>
 
-          {/* Camera selector + Draw Zone toggle */}
-          <div className="flex gap-4 mb-6">
+      <div style={s.mainGrid}>
+        {/* Editor Area */}
+        <section style={s.editorCard}>
+          <div style={s.toolbar}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-dim)', fontSize: '0.75rem', fontWeight: 700 }}>
+              <Camera size={14} /> ACTIVE NODE:
+            </div>
             <select
               value={selectedCam}
               onChange={(e) => {
                 setSelectedCam(e.target.value)
-                setDrawingMode(false)
-                setCurrentPoints([])
+                setShowEditor(false)
               }}
-              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100"
+              style={s.select}
             >
               {cameras.map((cam) => (
                 <option key={cam.cam_id} value={cam.cam_id}>
@@ -193,197 +179,119 @@ export default function Zones() {
             </select>
 
             <button
-              onClick={() => {
-                if (drawingMode) {
-                  setCurrentPoints([])
-                }
-                setDrawingMode(!drawingMode)
-              }}
-              className={`px-4 py-2 rounded font-semibold transition-colors ${
-                drawingMode
-                  ? 'bg-yellow-600 hover:bg-yellow-700 text-black'
-                  : 'bg-cyan-600 hover:bg-cyan-700 text-white'
-              }`}
+              onClick={() => setShowEditor(!showEditor)}
+              style={{ ...s.btn, ...(showEditor ? s.btnCancel : s.btnDraw) }}
             >
-              {drawingMode ? 'Cancel Drawing' : 'Draw Zone'}
+              {showEditor ? <X size={16} /> : <Plus size={16} />}
+              {showEditor ? 'ABORT DRAWING' : 'INITIALIZE BOUNDARY'}
             </button>
-
-            {drawingMode && (
-              <div className="flex gap-2 items-center">
-                <label className="text-sm text-gray-400">Color:</label>
-                <input
-                  type="color"
-                  value={newZoneColor}
-                  onChange={(e) => setNewZoneColor(e.target.value)}
-                  className="w-12 h-10 cursor-pointer rounded"
-                />
-              </div>
-            )}
           </div>
-        </div>
 
-        {/* Camera feed with SVG overlay */}
-        <div className="mb-6 rounded-lg overflow-hidden border border-gray-700">
-          <div
-            style={{
-              position: 'relative',
-              display: 'inline-block',
-              width: '100%',
-            }}
-          >
-            <img
-              ref={imgRef}
-              src={`${API_BASE}/api/stream/${selectedCam}`}
-              alt="Camera feed"
-              style={{
-                display: 'block',
-                maxWidth: '100%',
-                width: '100%',
-                height: 'auto',
-              }}
-              onError={(e) => {
-                e.target.src = '/placeholder-camera.png'
-              }}
+          {showEditor ? (
+            <ZoneEditor
+              cameraId={selectedCam}
+              streamUrl={`${API_BASE}/api/stream/${selectedCam}${token ? `?token=${token}` : ''}`}
+              onSave={handleEditorSave}
+              onCancel={() => setShowEditor(false)}
             />
-
-            {/* SVG overlay */}
-            <svg
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                cursor: drawingMode ? 'crosshair' : 'default',
-              }}
-              onClick={handleSvgClick}
-              onDoubleClick={handleSvgDoubleClick}
-              className="border-0"
-            >
-              {/* Render existing zones */}
-              {zones.map((zone) => {
-                const polygon = zone.polygon || []
-                if (polygon.length === 0) return null
-
-                const pointsStr = polygon
-                  .map((p) => `${p[0]},${p[1]}`)
-                  .join(' ')
-                const [cx, cy] = computeCentroid(polygon)
-
-                return (
-                  <g key={zone.zone_id}>
-                    <polygon
-                      points={pointsStr}
-                      fill={zone.color}
-                      fillOpacity="0.25"
-                      stroke={zone.color}
-                      strokeWidth="2"
-                    />
-                    <text
-                      x={cx}
-                      y={cy}
-                      fill={zone.color}
-                      fontSize="14"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      pointerEvents="none"
-                    >
-                      {zone.label}
-                    </text>
-                  </g>
-                )
-              })}
-
-              {/* Render in-progress zone being drawn */}
-              {drawingMode && currentPoints.length > 0 && (
-                <g>
-                  <polyline
-                    points={pointsString}
-                    stroke="#FFD700"
-                    strokeWidth="2"
-                    fill="none"
-                  />
-                  {currentPoints.map((point, idx) => (
-                    <circle
-                      key={idx}
-                      cx={point[0]}
-                      cy={point[1]}
-                      r="5"
-                      fill="#FFD700"
-                    />
-                  ))}
-                </g>
-              )}
-            </svg>
-          </div>
-        </div>
-
-        {/* Drawing instructions */}
-        {drawingMode && (
-          <div className="mb-6 p-4 bg-yellow-900 text-yellow-100 rounded border border-yellow-700">
-            <p className="text-sm">
-              Click points on the feed to draw a polygon. Double-click to close
-              and save. Minimum 3 points required.
-            </p>
-            {currentPoints.length > 0 && (
-              <p className="text-sm mt-2">
-                Points: {currentPoints.length}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Zones list */}
-        <div>
-          <h2 className="text-xl font-semibold mb-4">Zones for {selectedCam}</h2>
-          {zones.length === 0 ? (
-            <p className="text-gray-400">No zones for this camera.</p>
           ) : (
-            <div className="flex flex-wrap gap-4">
-              {zones.map((zone) => (
-                <div
-                  key={zone.zone_id}
-                  className="bg-gray-800 border border-gray-700 rounded p-4 flex items-center gap-3"
-                >
-                  {/* Color swatch */}
-                  <div
-                    className="w-6 h-6 rounded border border-gray-600 flex-shrink-0"
-                    style={{ backgroundColor: zone.color }}
-                  />
+            <div style={s.canvasContainer}>
+              <img
+                src={`${API_BASE}/api/stream/${selectedCam}${token ? `?token=${token}` : ''}`}
+                alt="Calibration feed"
+                style={s.feed}
+                onError={(e) => { e.target.src = 'https://via.placeholder.com/1280x720?text=CALIBRATION+FEED+OFFLINE' }}
+              />
 
-                  {/* Label */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-mono text-sm text-gray-100 truncate">
-                      {zone.label}
-                    </p>
-                  </div>
+              <svg style={s.svg}>
+                {zones.map((zone) => {
+                  const polygon = zone.polygon || []
+                  if (polygon.length === 0) return null
+                  const pointsStr = polygon.map((p) => `${p[0]},${p[1]}`).join(' ')
+                  const [cx, cy] = computeCentroid(polygon)
 
-                  {/* Active toggle */}
-                  <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={zone.active}
-                      onChange={() =>
-                        toggleZoneActive(zone.zone_id, zone.active)
-                      }
-                      className="w-4 h-4"
-                    />
-                    <span className="text-xs text-gray-400">Active</span>
-                  </label>
-
-                  {/* Delete button */}
-                  <button
-                    onClick={() => deleteZone(zone.zone_id)}
-                    className="px-3 py-1 bg-red-900 hover:bg-red-800 rounded text-sm text-gray-100 flex-shrink-0"
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))}
+                  return (
+                    <g key={zone.zone_id}>
+                      <polygon
+                        points={pointsStr}
+                        fill={zone.color}
+                        fillOpacity={zone.active ? "0.2" : "0.05"}
+                        stroke={zone.color}
+                        strokeWidth="2"
+                        strokeDasharray={zone.active ? "0" : "4"}
+                        strokeOpacity={zone.active ? "1" : "0.3"}
+                      />
+                      <text
+                        x={cx}
+                        y={cy}
+                        fill="#fff"
+                        fontSize="10"
+                        fontWeight="800"
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        pointerEvents="none"
+                        style={{ textShadow: '0 1px 4px rgba(0,0,0,0.8)', opacity: zone.active ? 1 : 0.4, textTransform: 'uppercase' }}
+                      >
+                        {zone.label}
+                      </text>
+                    </g>
+                  )
+                })}
+              </svg>
             </div>
           )}
-        </div>
+        </section>
+
+        {/* Sidebar Info */}
+        <aside style={s.sidebar}>
+          <div style={s.sideCard}>
+            <h3 style={s.sideTitle}><Shield size={14} /> ACTIVE BOUNDARIES</h3>
+            <div style={s.zoneList}>
+              {zones.length === 0 ? (
+                <div style={s.empty}>NO ZONES DEFINED FOR THIS NODE.</div>
+              ) : (
+                zones.map((zone) => (
+                  <div key={zone.zone_id} style={{
+                    ...s.zoneItem,
+                    opacity: zone.active ? 1 : 0.6,
+                    borderColor: zone.active ? 'var(--glass-border)' : 'transparent'
+                  }}>
+                    <div style={s.zoneHeader}>
+                      <div style={{ ...s.colorSwatch, backgroundColor: zone.color }} />
+                      <span style={s.zoneLabel}>{zone.label}</span>
+                    </div>
+                    <div style={s.zoneActions}>
+                      <label style={s.activeToggle}>
+                        <input
+                          type="checkbox"
+                          checked={zone.active}
+                          onChange={() => toggleZoneActive(zone.zone_id, zone.active)}
+                          style={{ margin: 0 }}
+                        />
+                        {zone.active ? 'MONITORING' : 'DISABLED'}
+                      </label>
+                      <button onClick={() => deleteZone(zone.zone_id)} style={s.deleteBtn}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div style={s.sideCard}>
+            <h3 style={s.sideTitle}><Info size={14} /> DOCUMENTATION</h3>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+              <p style={{ marginBottom: '8px' }}>Zones are spatial filters for the AI engine. Only detections within these boundaries will trigger alerts.</p>
+              <ul style={{ paddingLeft: '16px', margin: 0 }}>
+                <li>Minimum 3 points per zone.</li>
+                <li>Multiple zones per camera supported.</li>
+                <li>Overlapping zones are permitted.</li>
+              </ul>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   )

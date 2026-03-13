@@ -1,15 +1,24 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { Maximize2, Minimize2, Monitor, History, ShieldAlert } from 'lucide-react'
 import useStore, { API_BASE } from '../store/useStore'
 import ZoneOverlay from '../components/ZoneOverlay'
 
 function CameraCard({ camera }) {
-  const streamUrl = `${API_BASE}/api/stream/${camera.cam_id}`
+  const token = useStore((s) => s.token)
+  const streamUrl = `${API_BASE}/api/stream/${camera.cam_id}${token ? `?token=${token}` : ''}`
   const [zones, setZones] = useState([])
   const imgRef = useRef(null)
+  const cardRef = useRef(null)
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 })
+  const [isHovered, setIsHovered] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/zones?cam_id=${camera.cam_id}`)
+    const token = useStore.getState().token
+    fetch(`${API_BASE}/api/zones?cam_id=${camera.cam_id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
       .then((r) => r.ok ? r.json() : [])
       .then(setZones)
       .catch(() => {})
@@ -21,19 +30,43 @@ function CameraCard({ camera }) {
     }
   }
 
+  const toggleFullscreen = useCallback((e) => {
+    e.stopPropagation()
+    if (!cardRef.current) return
+    if (!document.fullscreenElement) {
+      cardRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {})
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    const onFsChange = () => { if (!document.fullscreenElement) setIsFullscreen(false) }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [])
+
   return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <span style={styles.label}>{camera.label || camera.cam_id}</span>
-        <span style={camera.alive ? styles.dotGreen : styles.dotRed} />
-      </div>
-      <div style={{ position: 'relative' }}>
+    <div
+      ref={cardRef}
+      style={{
+        ...s.card,
+        transform: isHovered && !isFullscreen ? 'translateY(-2px)' : 'translateY(0)',
+        borderColor: isHovered ? 'var(--accent-primary)' : 'var(--glass-border)',
+        boxShadow: isHovered ? '0 12px 40px rgba(0,0,0,0.6)' : s.card.boxShadow,
+        ...(isFullscreen ? { borderRadius: 0, borderWidth: 0, borderStyle: 'none' } : {}),
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div style={{ position: 'relative', background: '#000', flex: 1, overflow: 'hidden' }}>
         <img
           ref={imgRef}
           src={streamUrl}
           alt={`Stream ${camera.cam_id}`}
-          style={styles.feed}
+          style={{ ...s.feed, objectFit: isFullscreen ? 'contain' : 'cover' }}
           onLoad={handleImgLoad}
+          onError={(e) => { e.target.src = '' }}
         />
         <ZoneOverlay
           zones={zones}
@@ -41,30 +74,55 @@ function CameraCard({ camera }) {
           camHeight={imgSize.h}
           activeZoneIds={new Set()}
         />
+
+        {/* Live dot — always visible, top-right */}
+        <div style={s.liveDotWrap}>
+          <div style={camera.alive ? s.liveDotGreen : s.liveDotRed} />
+        </div>
+
+        {/* Hover overlay: cam name + fullscreen */}
+        <div style={{
+          ...s.hoverOverlay,
+          opacity: isHovered ? 1 : 0,
+          pointerEvents: isHovered ? 'auto' : 'none',
+        }}>
+          <div style={s.hoverCamName}>
+            {camera.label || camera.cam_id}
+          </div>
+          <button style={s.fullscreenBtn} onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
 function WeaponAlarmBanner({ alarm, onDismiss }) {
+  const token = useStore((s) => s.token)
   useEffect(() => {
     const timer = setTimeout(onDismiss, 60000)
     return () => clearTimeout(timer)
   }, [alarm, onDismiss])
 
   return (
-    <div style={styles.alarmOverlay}>
-      <div style={styles.alarmBox}>
-        <h1 style={styles.alarmTitle}>⚠ WEAPON DETECTED</h1>
-        <p style={styles.alarmDetail}>
-          Camera: {alarm.cam_id} — {alarm.class_name}
-          {alarm.confidence != null && ` (${(alarm.confidence * 100).toFixed(0)}%)`}
+    <div style={s.alarmOverlay}>
+      <div style={s.alarmBox}>
+        <div style={s.alarmHeader}>
+          <ShieldAlert size={32} />
+          <h1 style={s.alarmTitle}>WEAPON DETECTED</h1>
+        </div>
+        <p style={s.alarmDetail}>
+          LOCATION: <span className="mono">{alarm.cam_id}</span> &bull; THREAT: <span className="mono">{alarm.class_name.toUpperCase()}</span>
+          {alarm.confidence != null && ` [CONFIDENCE: ${(alarm.confidence * 100).toFixed(0)}%]`}
         </p>
         {alarm.snapshot_url && (
-          <img src={`${API_BASE}${alarm.snapshot_url}`} alt="Snapshot" style={styles.alarmSnapshot} />
+          <div style={s.alarmSnapshotContainer}>
+            <img src={`${API_BASE}${alarm.snapshot_url}${token ? `?token=${token}` : ''}`} alt="Threat Snapshot" style={s.alarmSnapshot} />
+          </div>
         )}
-        <button style={styles.dismissBtn} onClick={onDismiss}>
-          DISMISS
+        <button style={s.dismissBtn} onClick={onDismiss}>
+          ACKNOWLEDGE & DISMISS
         </button>
       </div>
     </div>
@@ -85,210 +143,280 @@ export default function LiveView() {
 
   useEffect(() => {
     fetchCameras()
-    startWebSocket()
     const interval = setInterval(fetchCameras, 10000)
-    return () => {
-      clearInterval(interval)
-      stopWebSocket()
-    }
+    return () => clearInterval(interval)
   }, [])
 
   const gridCols = gridLayout === '1x1' ? 1 : gridLayout === '3x3' ? 3 : 2
 
   return (
-    <div style={styles.root}>
+    <div style={s.root}>
       {weaponAlarm && <WeaponAlarmBanner alarm={weaponAlarm} onDismiss={dismissWeaponAlarm} />}
 
-      <div style={styles.topBar}>
-        <h2 style={styles.title}>SENTINAL — Live View</h2>
-        <div style={styles.controls}>
-          {['1x1', '2x2', '3x3'].map((l) => (
-            <button
-              key={l}
-              style={gridLayout === l ? styles.btnActive : styles.btn}
-              onClick={() => setGridLayout(l)}
-            >
-              {l}
-            </button>
-          ))}
-          <span style={wsConnected ? styles.wsGreen : styles.wsRed}>
-            {wsConnected ? '● WS' : '○ WS'}
-          </span>
+      <header style={s.header}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h2 style={s.title}>Surveillance Command</h2>
+          <div style={wsConnected ? s.wsStatusOn : s.wsStatusOff}>
+            {wsConnected ? 'Network Synchronized' : 'Network Offline'}
+          </div>
         </div>
-      </div>
+        
+        <div style={s.controls}>
+          <div style={s.gridSelector}>
+            {['1x1', '2x2', '3x3'].map((l) => (
+              <button
+                key={l}
+                style={gridLayout === l ? s.gridBtnActive : s.gridBtn}
+                onClick={() => setGridLayout(l)}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div style={s.mainLayout}>
         <div
           style={{
-            ...styles.grid,
+            ...s.grid,
             gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
           }}
         >
           {cameras.length === 0 ? (
-            <div style={styles.empty}>No cameras added yet.</div>
+            <div style={s.emptyState}>
+              <Monitor size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
+              <p>NO ACTIVE CAMERA FEEDS</p>
+              <Link to="/cameras" style={{...s.addCamPrompt, textDecoration: 'none'}}>CONFIGURE CAMERAS</Link>
+            </div>
           ) : (
             cameras.map((cam) => <CameraCard key={cam.cam_id} camera={cam} />)
           )}
         </div>
 
-        <div style={styles.sidebar}>
-          <h3 style={styles.sidebarTitle}>Event Feed</h3>
-          {events.length === 0 ? (
-            <p style={styles.sidebarEmpty}>No events yet.</p>
-          ) : (
-            events.map((ev, i) => (
-              <div key={i} style={styles.eventItem}>
-                <span style={styles.eventType}>{ev.alert_type || ev.type}</span>
-                <span style={styles.eventMeta}>
-                  {ev.cam_id} · {ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : ''}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
+        <aside style={s.sidebar}>
+          <div style={s.sidebarHeader}>
+            <History size={16} />
+            REAL-TIME INTELLIGENCE
+          </div>
+          <div style={s.eventList}>
+            {events.length === 0 ? (
+              <p style={s.sidebarEmpty}>Awaiting detection events...</p>
+            ) : (
+              events.map((ev, i) => (
+                  <div style={s.eventCard}>
+                    <div style={s.eventTime}>{ev.timestamp ? new Date(ev.timestamp).toLocaleString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--:--:--'}</div>
+                    <div style={s.eventType}>{ev.alert_type?.toUpperCase() || 'UNKNOWN'}</div>
+                    <div style={s.eventLocation}>{ev.cam_id}</div>
+                  </div>
+              ))
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Inline styles — no external CSS dependency for Phase 1 milestone
-// ---------------------------------------------------------------------------
-const styles = {
+const s = {
   root: {
     display: 'flex',
     flexDirection: 'column',
-    height: '100vh',
-    background: '#0d0d0d',
-    color: '#e0e0e0',
-    fontFamily: 'monospace',
+    height: 'calc(100vh - 64px)', 
   },
-  topBar: {
+  header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '8px 16px',
-    background: '#1a1a1a',
-    borderBottom: '1px solid #333',
+    padding: '0 0 24px 0',
   },
-  title: { margin: 0, fontSize: '1rem', color: '#00e5ff' },
-  controls: { display: 'flex', alignItems: 'center', gap: '8px' },
-  btn: {
-    padding: '2px 8px',
-    background: '#2a2a2a',
-    color: '#aaa',
-    border: '1px solid #444',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '0.75rem',
-  },
-  btnActive: {
-    padding: '2px 8px',
-    background: '#00e5ff',
-    color: '#000',
-    border: '1px solid #00e5ff',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '0.75rem',
-  },
-  wsGreen: { color: '#00e676', fontSize: '0.75rem' },
-  wsRed: { color: '#ff1744', fontSize: '0.75rem' },
+  title: { margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' },
+  wsStatusOn: { fontSize: '0.7rem', color: 'var(--status-success)', background: 'rgba(16, 185, 129, 0.1)', padding: '6px 12px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.05em' },
+  wsStatusOff: { fontSize: '0.7rem', color: 'var(--status-danger)', background: 'rgba(244, 63, 94, 0.1)', padding: '6px 12px', borderRadius: '20px', fontWeight: 700, letterSpacing: '0.05em' },
+  
+  controls: { display: 'flex', gap: '16px' },
+  gridSelector: { background: 'var(--bg-surface)', padding: '6px', borderRadius: 'var(--radius-md)', display: 'flex', gap: '4px', border: '1px solid var(--border-base)', boxShadow: 'var(--shadow-sm)' },
+  gridBtn: { background: 'transparent', border: 'none', color: 'var(--text-sub)', padding: '6px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' },
+  gridBtnActive: { background: 'var(--bg-app)', border: 'none', color: 'var(--text-main)', padding: '6px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, boxShadow: 'var(--shadow-sm)' },
+
+  mainLayout: { display: 'flex', flex: 1, gap: '24px', overflow: 'hidden' },
   grid: {
     display: 'grid',
     flex: 1,
-    gap: '8px',
-    padding: '8px',
+    gap: '24px',
     overflowY: 'auto',
     alignContent: 'start',
-    height: '100%',
+    paddingRight: '8px'
   },
   card: {
-    background: '#1a1a1a',
-    border: '1px solid #333',
-    borderRadius: '4px',
+    background: '#000',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'var(--border-base)',
+    borderRadius: 'var(--radius-lg)',
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
-    maxHeight: 'calc(100vh - 100px)',
+    position: 'relative',
+    transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease, box-shadow 0.2s ease',
+    boxShadow: 'var(--shadow-md)',
   },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '4px 8px',
-    background: '#111',
+  feed: { width: '100%', height: '100%', display: 'block', objectFit: 'cover' },
+
+  // iOS-style live dot — always visible, top-right
+  liveDotWrap: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    zIndex: 10,
   },
-  label: { fontSize: '0.75rem', color: '#aaa' },
-  dotGreen: {
-    width: '8px',
-    height: '8px',
+  liveDotGreen: {
+    width: '10px',
+    height: '10px',
     borderRadius: '50%',
-    background: '#00e676',
-    display: 'inline-block',
+    background: '#30d158',
+    boxShadow: '0 0 6px 2px rgba(48, 209, 88, 0.6)',
+    animation: 'livePulse 2s ease-in-out infinite',
   },
-  dotRed: {
-    width: '8px',
-    height: '8px',
+  liveDotRed: {
+    width: '10px',
+    height: '10px',
     borderRadius: '50%',
-    background: '#ff1744',
-    display: 'inline-block',
+    background: '#ff453a',
+    boxShadow: '0 0 6px 2px rgba(255, 69, 58, 0.5)',
   },
-  feed: { width: '100%', display: 'block', objectFit: 'contain' },
-  empty: { color: '#555', padding: '32px', gridColumn: '1 / -1', textAlign: 'center' },
-  sidebar: {
-    width: '240px',
-    minWidth: '240px',
-    background: '#111',
-    borderLeft: '1px solid #333',
-    padding: '8px',
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  sidebarTitle: { margin: '0 0 8px', fontSize: '0.85rem', color: '#00e5ff' },
-  sidebarEmpty: { color: '#555', fontSize: '0.75rem' },
-  eventItem: {
-    padding: '4px 6px',
-    background: '#1a1a1a',
-    borderRadius: '3px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    borderLeft: '3px solid #00e5ff',
-  },
-  eventType: { fontSize: '0.75rem', fontWeight: 'bold', color: '#ff9100' },
-  eventMeta: { fontSize: '0.65rem', color: '#777' },
-  // Weapon alarm overlay
-  alarmOverlay: {
-    position: 'fixed',
+
+  // Hover overlay — cam name + fullscreen
+  hoverOverlay: {
+    position: 'absolute',
     inset: 0,
-    background: 'rgba(180,0,0,0.92)',
+    background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.4) 100%)',
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    padding: '14px',
+    zIndex: 10,
+    transition: 'opacity 0.25s ease',
+  },
+  hoverCamName: {
+    color: '#fff',
+    fontSize: '0.8rem',
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+    textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+  },
+  fullscreenBtn: {
+    background: 'rgba(255,255,255,0.15)',
+    backdropFilter: 'blur(8px)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    borderRadius: '8px',
+    color: '#fff',
+    cursor: 'pointer',
+    padding: '6px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 9999,
-    animation: 'none',
+    transition: 'background 0.2s',
+  },
+
+  sidebar: {
+    width: '320px',
+    background: 'var(--bg-surface)',
+    borderRadius: 'var(--radius-lg)',
+    border: '1px solid var(--border-base)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    boxShadow: 'var(--shadow-md)',
+  },
+  sidebarHeader: {
+    padding: '20px',
+    fontSize: '0.8rem',
+    fontWeight: 800,
+    color: 'var(--text-sub)',
+    borderBottom: '1px solid var(--border-base)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    letterSpacing: '0.05em'
+  },
+  eventList: { 
+    flex: 1, 
+    overflowY: 'auto', 
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  eventCard: {
+    padding: '16px',
+    background: 'var(--bg-app)',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--border-base)',
+    borderLeft: '4px solid var(--accent-primary)',
+    transition: 'all 0.2s ease',
+    cursor: 'default'
+  },
+  eventTime: { fontSize: '0.7rem', color: 'var(--text-dim)', marginBottom: '8px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' },
+  eventType: { fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '0.02em' },
+  eventLocation: { fontSize: '0.75rem', color: 'var(--text-sub)', marginTop: '6px', fontWeight: 500 },
+  sidebarEmpty: { textAlign: 'center', padding: '60px 20px', color: 'var(--text-dim)', fontSize: '0.85rem', fontWeight: 500 },
+
+  emptyState: { 
+    gridColumn: '1 / -1', 
+    height: '400px', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    color: 'var(--text-dim)',
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    letterSpacing: '1px',
+    background: 'var(--bg-surface)',
+    borderRadius: 'var(--radius-lg)',
+    border: '2px dashed var(--border-bright)'
+  },
+  addCamPrompt: { marginTop: '24px', background: 'var(--accent-primary)', color: '#fff', border: 'none', padding: '12px 28px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 12px var(--accent-soft)', display: 'inline-flex', alignItems: 'center' },
+
+  // Alarm Overlay
+  alarmOverlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.85)',
+    backdropFilter: 'blur(20px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10000,
+    padding: '40px',
+    animation: 'fadeIn 0.3s ease-out'
   },
   alarmBox: {
     textAlign: 'center',
-    padding: '40px',
-    background: '#1a0000',
-    border: '3px solid #ff1744',
-    borderRadius: '8px',
-    maxWidth: '600px',
+    padding: '48px',
+    background: '#000',
+    border: '2px solid var(--status-danger)',
+    borderRadius: 'var(--radius-lg)',
+    maxWidth: '700px',
+    boxShadow: '0 0 80px rgba(244, 63, 94, 0.4)',
   },
-  alarmTitle: { color: '#ff1744', fontSize: '2rem', margin: '0 0 16px' },
-  alarmDetail: { color: '#fff', fontSize: '1.1rem', margin: '0 0 16px' },
-  alarmSnapshot: { maxWidth: '100%', maxHeight: '300px', margin: '0 0 16px', borderRadius: '4px' },
+  alarmHeader: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginBottom: '32px', color: 'var(--status-danger)' },
+  alarmTitle: { fontSize: '3rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', lineHeight: 1 },
+  alarmDetail: { color: '#ffffff', fontSize: '1.1rem', marginBottom: '32px', fontWeight: 500, letterSpacing: '0.05em' },
+  alarmSnapshotContainer: { border: '1px solid rgba(255,255,255,0.2)', borderRadius: 'var(--radius-md)', overflow: 'hidden', marginBottom: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' },
+  alarmSnapshot: { width: '100%', display: 'block' },
   dismissBtn: {
-    padding: '10px 32px',
-    background: '#ff1744',
+    background: 'var(--status-danger)',
     color: '#fff',
     border: 'none',
-    borderRadius: '4px',
+    padding: '18px 48px',
+    borderRadius: 'var(--radius-md)',
     fontSize: '1rem',
+    fontWeight: 800,
     cursor: 'pointer',
-    fontWeight: 'bold',
+    letterSpacing: '0.05em',
+    transition: 'transform 0.1s active',
+    boxShadow: '0 8px 24px rgba(244, 63, 94, 0.4)'
   },
 }

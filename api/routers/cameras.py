@@ -13,9 +13,34 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from engine.config import settings
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def validate_camera_url(url: str) -> None:
+    """
+    Validate camera URL scheme to prevent SSRF and other URI-based attacks.
+    Allowed: rtsp://, http://, https://, or a small integer (for local devices).
+    """
+    url_lower = url.lower()
+    allowed_schemes = ("rtsp://", "http://", "https://")
+    
+    # Check if it's a numeric device index (e.g. "0", "1")
+    if url.isdigit() and int(url) < 10:
+        return
+
+    if not any(url_lower.startswith(s) for s in allowed_schemes):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid camera URL scheme. Allowed: {', '.join(allowed_schemes)} or numeric index (0-9)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +67,15 @@ class CameraPatchRequest(BaseModel):
 async def add_camera(body: CameraAddRequest) -> dict:
     """Start a new camera pipeline and persist it."""
     from api.services.camera_service import camera_service  # lazy — avoids circular import
+
+    # Enforce _MAX_CAMERAS limit
+    if len(camera_service.list_cameras()) >= settings._MAX_CAMERAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum number of cameras reached ({settings._MAX_CAMERAS})."
+        )
+
+    validate_camera_url(body.url)
 
     existing = camera_service.get_camera_info(body.cam_id)
     if existing is not None:
@@ -77,6 +111,9 @@ async def list_cameras() -> list[dict]:
 async def patch_camera(cam_id: str, body: CameraPatchRequest) -> dict:
     """Update camera metadata or restart with a new URL."""
     from api.services.camera_service import camera_service
+
+    if body.url is not None:
+        validate_camera_url(body.url)
 
     info = camera_service.get_camera_info(cam_id)
     if info is None:

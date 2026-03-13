@@ -1,37 +1,36 @@
-import { useState, useEffect } from 'react'
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { API_BASE } from '../store/useStore'
+import { useState, useEffect, useCallback } from 'react'
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
+import { BarChart3, Activity, Camera, ShieldAlert, Zap, RefreshCw, Clock } from 'lucide-react'
+import useStore from '../store/useStore'
 
 export default function Analytics() {
+  const fetchStatsStore = useStore((s) => s.fetchStats)
+  const fetchEventsStore = useStore((s) => s.fetchEvents)
+  
   const [stats, setStats] = useState(null)
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [statsRes, eventsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/stats`),
-        fetch(`${API_BASE}/api/events?limit=500`),
+      const [statsData, eventsData] = await Promise.all([
+        fetchStatsStore(),
+        fetchEventsStore('limit=500'),
       ])
 
-      if (statsRes.ok) {
-        setStats(await statsRes.json())
-      }
-
-      if (eventsRes.ok) {
-        setEvents(await eventsRes.json())
-      }
+      if (statsData) setStats(statsData)
+      if (eventsData) setEvents(eventsData)
     } catch (err) {
-      console.error('Failed to fetch analytics:', err)
+      console.error('Telemetry retrieval fault:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [fetchStatsStore, fetchEventsStore])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   // Group events by hour for line chart
   const eventsByHour = {}
@@ -48,224 +47,216 @@ export default function Analytics() {
     return { hour: key, count: eventsByHour[key] || 0 }
   })
 
-  // Group events by camera for bar chart
-  const eventsByCam = {}
-  events.forEach((e) => {
-    if (!e.cam_id) return
-    eventsByCam[e.cam_id] = (eventsByCam[e.cam_id] || 0) + 1
-  })
+  const cameraData = Object.entries(events.reduce((acc, e) => {
+    if (e.cam_id) acc[e.cam_id] = (acc[e.cam_id] || 0) + 1
+    return acc
+  }, {})).map(([camera, events]) => ({ camera, events }))
 
-  const cameraData = Object.entries(eventsByCam).map(([cam, count]) => ({
-    camera: cam,
-    events: count,
-  }))
-
-  // Group events by type for pie chart
-  const eventsByType = {}
-  events.forEach((e) => {
-    if (!e.alert_type) return
-    eventsByType[e.alert_type] = (eventsByType[e.alert_type] || 0) + 1
-  })
-
-  const typeData = Object.entries(eventsByType).map(([type, count]) => ({
-    name: type,
-    value: count,
-  }))
+  const typeData = Object.entries(events.reduce((acc, e) => {
+    if (e.alert_type) acc[e.alert_type] = (acc[e.alert_type] || 0) + 1
+    return acc
+  }, {})).map(([name, value]) => ({ name, value }))
 
   const COLORS = {
-    intrusion: '#ff9100',
-    weapon: '#ff1744',
-    loitering: '#ffea00',
-    crowding: '#e040fb',
-    violence: '#ff1744',
-    face_match: '#00e676',
-    anomaly: '#00bfff',
+    intrusion: '#f59e0b',
+    weapon: '#f43f5e',
+    loitering: '#8b5cf6',
+    crowding: '#d946ef',
+    violence: '#ef4444',
+    face_match: '#10b981',
+    anomaly: '#3b82f6',
   }
 
-  if (loading) {
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={s.tooltip}>
+          <p style={s.tooltipLabel}>{label}</p>
+          <p style={s.tooltipValue}>{`${payload[0].value} EVENTS`}</p>
+        </div>
+      )
+    }
+    return null
+  }
+
+  if (loading && !stats) {
     return (
       <div style={s.root}>
-        <p style={s.dim}>Loading analytics...</p>
+        <div style={s.loadingBox}>
+          <RefreshCw size={32} style={s.spin} />
+          <p>SYNCHRONIZING TELEMETRY...</p>
+        </div>
       </div>
     )
   }
 
   return (
     <div style={s.root}>
-      <h2 style={s.title}>Analytics & Statistics</h2>
+      <header style={s.header}>
+        <div>
+          <h2 style={s.title}>System Intelligence</h2>
+          <p style={s.subtitle}>Deep analytics and behavioral patterns across the neural network</p>
+        </div>
+        <button style={s.syncBtn} onClick={fetchData}>
+          <RefreshCw size={14} /> REFRESH DATA
+        </button>
+      </header>
 
-      {/* Summary Cards */}
+      {/* Telemetry Cards */}
       <div style={s.cardsGrid}>
-        <div style={s.card}>
-          <div style={s.cardLabel}>Total Events</div>
-          <div style={s.cardValue}>{stats?.total_events || 0}</div>
+        <div style={s.telemetryCard}>
+          <div style={s.cardIcon}><Zap size={20} color="var(--accent-primary)" /></div>
+          <div style={s.cardData}>
+            <div style={s.statValue}>{stats?.total_events || 0}</div>
+            <div style={s.statLabel}>AGGREGATE EVENTS</div>
+          </div>
         </div>
-        <div style={s.card}>
-          <div style={s.cardLabel}>Events Today</div>
-          <div style={s.cardValue}>{stats?.events_today || 0}</div>
+        <div style={s.telemetryCard}>
+          <div style={s.cardIcon}><Activity size={20} color="var(--status-success)" /></div>
+          <div style={s.cardData}>
+            <div style={s.statValue}>{stats?.events_today || 0}</div>
+            <div style={s.statLabel}>24H INTENSITY</div>
+          </div>
         </div>
-        <div style={s.card}>
-          <div style={s.cardLabel}>Active Cameras</div>
-          <div style={s.cardValue}>{stats?.active_cameras || 0}</div>
+        <div style={s.telemetryCard}>
+          <div style={s.cardIcon}><Camera size={20} color="var(--accent-secondary)" /></div>
+          <div style={s.cardData}>
+            <div style={s.statValue}>{stats?.active_cameras || 0}</div>
+            <div style={s.statLabel}>ONLINE NODES</div>
+          </div>
+        </div>
+        <div style={s.telemetryCard}>
+          <div style={s.cardIcon}><ShieldAlert size={20} color="var(--status-danger)" /></div>
+          <div style={s.cardData}>
+            <div style={s.statValue}>{events.filter(e => e.alert_type === 'weapon').length}</div>
+            <div style={s.statLabel}>CRITICAL THREATS</div>
+          </div>
         </div>
       </div>
 
-      {/* Charts */}
+      {/* Analytics Terminal */}
       <div style={s.chartsContainer}>
-        {/* Line Chart - Events by Hour */}
-        <div style={s.chartBox}>
-          <h3 style={s.chartTitle}>Events by Hour (Last 24 Hours)</h3>
-          {hourlyData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={hourlyData}>
-                <CartesianGrid stroke="#333" />
-                <XAxis dataKey="hour" stroke="#888" />
-                <YAxis stroke="#888" />
-                <Tooltip
-                  contentStyle={{ background: '#1a1a1a', border: '1px solid #444', color: '#e0e0e0' }}
-                  cursor={{ stroke: '#00e5ff', strokeWidth: 2 }}
-                />
-                <Line type="monotone" dataKey="count" stroke="#00e5ff" dot={{ fill: '#00e5ff' }} />
-              </LineChart>
+        {/* Main Intensity Graph */}
+        <div style={{ ...s.chartBox, gridColumn: 'span 2' }}>
+          <div style={s.chartHeader}>
+            <Clock size={14} />
+            TEMPORAL INTENSITY (24H)
+          </div>
+          <div style={{ height: 300, marginTop: '20px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={hourlyData}>
+                <defs>
+                  <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-base)" vertical={false} />
+                <XAxis dataKey="hour" stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="count" stroke="var(--accent-primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorCount)" />
+              </AreaChart>
             </ResponsiveContainer>
-          ) : (
-            <p style={s.dim}>No data</p>
-          )}
+          </div>
         </div>
 
-        {/* Bar Chart - Events by Camera */}
+        {/* Node Distribution */}
         <div style={s.chartBox}>
-          <h3 style={s.chartTitle}>Events by Camera</h3>
-          {cameraData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={cameraData}>
-                <CartesianGrid stroke="#333" />
-                <XAxis dataKey="camera" stroke="#888" />
-                <YAxis stroke="#888" />
-                <Tooltip
-                  contentStyle={{ background: '#1a1a1a', border: '1px solid #444', color: '#e0e0e0' }}
-                />
-                <Bar dataKey="events" fill="#00e5ff" />
+          <div style={s.chartHeader}>
+            <BarChart3 size={14} />
+            NODE ALERT DISTRIBUTION
+          </div>
+          <div style={{ height: 300, marginTop: '20px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={cameraData} layout="vertical">
+                <CartesianGrid stroke="var(--border-base)" horizontal={false} strokeDasharray="3 3" />
+                <XAxis type="number" stroke="var(--text-dim)" fontSize={10} hide />
+                <YAxis dataKey="camera" type="category" stroke="var(--text-sub)" fontSize={10} width={80} tickLine={false} axisLine={false} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--border-base)' }} />
+                <Bar dataKey="events" fill="var(--accent-secondary)" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer>
-          ) : (
-            <p style={s.dim}>No data</p>
-          )}
+          </div>
         </div>
 
-        {/* Pie Chart - Events by Type */}
+        {/* Classification Mix */}
         <div style={s.chartBox}>
-          <h3 style={s.chartTitle}>Events by Type</h3>
-          {typeData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
+          <div style={s.chartHeader}>
+            <Activity size={14} />
+            THREAT CLASSIFICATION MIX
+          </div>
+          <div style={{ height: 300, marginTop: '20px' }}>
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={typeData}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
+                  innerRadius={60}
                   outerRadius={100}
-                  fill="#8884d8"
+                  paddingAngle={5}
                   dataKey="value"
+                  stroke="var(--bg-surface)"
+                  strokeWidth={2}
                 >
                   {typeData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={COLORS[entry.name] || '#00e5ff'}
-                    />
+                    <Cell key={`cell-${index}`} fill={COLORS[entry.name] || 'var(--accent-primary)'} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ background: '#1a1a1a', border: '1px solid #444', color: '#e0e0e0' }}
-                />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '20px', color: 'var(--text-sub)' }} />
               </PieChart>
             </ResponsiveContainer>
-          ) : (
-            <p style={s.dim}>No data</p>
-          )}
+          </div>
         </div>
-      </div>
-
-      {/* Refresh Button */}
-      <div style={s.actions}>
-        <button style={s.btn} onClick={fetchData}>
-          Refresh
-        </button>
       </div>
     </div>
   )
 }
 
 const s = {
-  root: {
-    padding: '16px',
-    background: '#0d0d0d',
-    minHeight: '100vh',
-    color: '#e0e0e0',
-    fontFamily: 'monospace',
+  root: { display: 'flex', flexDirection: 'column', gap: '32px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' },
+  subtitle: { margin: '6px 0 0', fontSize: '0.95rem', color: 'var(--text-sub)' },
+  
+  syncBtn: { 
+    display: 'flex', alignItems: 'center', gap: '8px', 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    color: 'var(--text-main)', padding: '10px 16px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.2s',
+    boxShadow: 'var(--shadow-sm)'
   },
-  title: {
-    margin: '0 0 20px',
-    color: '#00e5ff',
-    fontSize: '1.3rem',
+
+  cardsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' },
+  telemetryCard: { 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    borderRadius: 'var(--radius-lg)', padding: '24px', display: 'flex', 
+    alignItems: 'center', gap: '20px', boxShadow: 'var(--shadow-md)' 
   },
-  cardsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-    gap: '12px',
-    marginBottom: '24px',
+  cardIcon: { 
+    width: '48px', height: '48px', borderRadius: 'var(--radius-md)', 
+    background: 'var(--bg-surface-raised)', display: 'flex', 
+    alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-bright)' 
   },
-  card: {
-    background: '#1a1a1a',
-    border: '1px solid #333',
-    borderRadius: '6px',
-    padding: '16px',
-    textAlign: 'center',
+  statValue: { fontSize: '2rem', fontWeight: 900, color: 'var(--text-main)', lineHeight: '1', letterSpacing: '-0.03em' },
+  statLabel: { fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '0.05em', marginTop: '6px' },
+
+  chartsContainer: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' },
+  chartBox: { 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    borderRadius: 'var(--radius-lg)', padding: '32px', boxShadow: 'var(--shadow-md)' 
   },
-  cardLabel: {
-    color: '#777',
-    fontSize: '0.85rem',
-    marginBottom: '8px',
+  chartHeader: { 
+    display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.8rem', 
+    fontWeight: 800, color: 'var(--text-sub)', letterSpacing: '0.05em' 
   },
-  cardValue: {
-    color: '#00e5ff',
-    fontSize: '2rem',
-    fontWeight: 'bold',
-  },
-  chartsContainer: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-    gap: '20px',
-    marginBottom: '20px',
-  },
-  chartBox: {
-    background: '#1a1a1a',
-    border: '1px solid #333',
-    borderRadius: '6px',
-    padding: '16px',
-  },
-  chartTitle: {
-    margin: '0 0 12px',
-    color: '#00e5ff',
-    fontSize: '0.95rem',
-  },
-  dim: {
-    color: '#555',
-    fontSize: '0.85rem',
-  },
-  actions: {
-    display: 'flex',
-    gap: '12px',
-  },
-  btn: {
-    padding: '8px 20px',
-    background: '#00e5ff',
-    color: '#000',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '0.85rem',
-    fontWeight: 'bold',
-  },
+
+  tooltip: { background: 'var(--bg-surface)', border: '1px solid var(--border-bright)', padding: '12px 16px', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)' },
+  tooltipLabel: { margin: 0, fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase' },
+  tooltipValue: { margin: '6px 0 0', fontSize: '1rem', fontWeight: 900, color: 'var(--text-main)' },
+
+  loadingBox: { height: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', color: 'var(--text-dim)', letterSpacing: '2px', fontSize: '0.85rem', fontWeight: 600 },
+  spin: { animation: 'spin 2s linear infinite' }
 }

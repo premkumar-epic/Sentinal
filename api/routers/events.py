@@ -8,14 +8,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from engine.storage.db import get_events
+from api.middleware.auth import get_current_user_from_query
+from engine.storage.db import get_events, delete_all_events
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["events"])
+
+# Snapshot router — requires token via query parameter
+# because browsers load <img src="..."> without Bearer headers.
+snapshot_router = APIRouter(tags=["snapshots"])
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +71,13 @@ async def list_events(
     return rows
 
 
+@router.delete("/api/events")
+async def clear_events():
+    """Clear all records from the event log."""
+    await delete_all_events()
+    return {"status": "cleared", "message": "Event log has been purged"}
+
+
 @router.get("/api/events/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str):
     """Return a single event by ID. 404 if not found."""
@@ -97,9 +109,9 @@ async def get_event(event_id: str):
     return d
 
 
-@router.get("/api/snapshots/{path:path}")
-async def serve_snapshot(path: str):
-    """Serve a snapshot JPEG file by relative path. 404 if file not found."""
+@snapshot_router.get("/api/snapshots/{path:path}")
+async def serve_snapshot(path: str, _user: str = Depends(get_current_user_from_query)):
+    """Serve a snapshot JPEG file by relative path. Requires token in query."""
     file_path = Path(path)
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail=f"Snapshot '{path}' not found.")

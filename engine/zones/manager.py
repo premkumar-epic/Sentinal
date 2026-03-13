@@ -50,7 +50,20 @@ class ZoneManager:
     Manages detection zones and performs intrusion detection.
 
     This class is thread-safe and supports hot-reloading of zone configurations.
+    Uses a singleton pattern so API and pipeline share the same instance.
     """
+
+    _instance: Optional['ZoneManager'] = None
+    _instance_lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls, zones_file: str = settings.zones_file) -> 'ZoneManager':
+        """Return the process-wide singleton ZoneManager, creating it if needed."""
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls(zones_file)
+        return cls._instance
 
     def __init__(self, zones_file: str = settings.zones_file) -> None:
         """
@@ -65,13 +78,21 @@ class ZoneManager:
 
         self.reload()
 
+        self.observer = None
         if HAS_WATCHDOG:
             try:
                 self._setup_watchdog()
             except Exception as e:
-                logger.warning(f"Failed to start watchdog for zone file: {e}")
+                logger.warning("Failed to start watchdog for zone file: %s", e)
         else:
             logger.warning("Watchdog not available. Hot-reloading of zones will be disabled.")
+
+    def stop(self) -> None:
+        """Stop the watchdog observer if running."""
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
+            logger.info("ZoneManager Watchdog stopped.")
 
     def _setup_watchdog(self) -> None:
         """Setup watchdog observer for hot-reloading the zones file."""
@@ -81,7 +102,7 @@ class ZoneManager:
 
             def on_modified(self, event):
                 if event.src_path == os.path.abspath(self.manager.zones_file):
-                    logger.info(f"Zones file {self.manager.zones_file} modified. Reloading...")
+                    logger.info("Zones file %s modified. Reloading...", self.manager.zones_file)
                     self.manager.reload()
 
         self.observer = Observer()
@@ -100,7 +121,7 @@ class ZoneManager:
         """
         with self._lock:
             if not os.path.exists(self.zones_file):
-                logger.warning(f"Zones file {self.zones_file} does not exist. Initializing empty list.")
+                logger.warning("Zones file %s does not exist. Initializing empty list.", self.zones_file)
                 self.zones = []
                 return
 
@@ -114,9 +135,9 @@ class ZoneManager:
                             item['polygon'] = [tuple(p) for p in item['polygon']]
                         new_zones.append(Zone(**item))
                     self.zones = new_zones
-                    logger.debug(f"Successfully reloaded {len(self.zones)} zones.")
+                    logger.debug("Successfully reloaded %d zones.", len(self.zones))
             except Exception as e:
-                logger.error(f"Error loading zones file {self.zones_file}: {e}")
+                logger.error("Error loading zones file %s: %s", self.zones_file, e)
 
     def _save_atomic(self) -> None:
         """Atomically write the current zones list to the zones_file."""
@@ -138,7 +159,7 @@ class ZoneManager:
             except Exception as e:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
-                logger.error(f"Failed to save zones atomically: {e}")
+                logger.error("Failed to save zones atomically: %s", e)
                 raise
 
     def check_intrusions(self, tracks: List[Any], cam_id: str) -> List[ZoneIntrusion]:
@@ -202,7 +223,7 @@ class ZoneManager:
             self.zones = [z for z in self.zones if z.zone_id != zone.zone_id]
             self.zones.append(zone)
             self._save_atomic()
-            logger.info(f"Zone added: {zone.zone_id} ({zone.label})")
+            logger.info("Zone added: %s (%s)", zone.zone_id, zone.label)
 
     def remove_zone(self, zone_id: str) -> None:
         """
@@ -216,6 +237,6 @@ class ZoneManager:
             self.zones = [z for z in self.zones if z.zone_id != zone_id]
             if len(self.zones) < original_count:
                 self._save_atomic()
-                logger.info(f"Zone removed: {zone_id}")
+                logger.info("Zone removed: %s", zone_id)
             else:
-                logger.warning(f"Attempted to remove non-existent zone: {zone_id}")
+                logger.warning("Attempted to remove non-existent zone: %s", zone_id)

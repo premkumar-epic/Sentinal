@@ -5,7 +5,7 @@ FastAPI dependency for validating Bearer JWT tokens on protected routes.
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
@@ -34,6 +34,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     Raises:
         HTTPException: 401 if token is invalid, expired, or missing sub claim
     """
+    return await _validate_token(token)
+
+
+async def get_current_user_from_query(token: str = Query(...)) -> str:
+    """
+    FastAPI dependency for validating JWT tokens passed as a query parameter.
+    Useful for components that cannot send Bearer headers (e.g. <img> tags).
+    """
+    return await _validate_token(token)
+
+
+async def _validate_token(token: str) -> str:
+    """Internal helper to validate JWT and extract username."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

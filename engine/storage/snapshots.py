@@ -6,7 +6,7 @@ Called from daemon threads — must never block the video pipeline.
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import cv2
 import numpy as np
@@ -26,7 +26,7 @@ def save_snapshot(frame: np.ndarray, cam_id: str, alert_type: str) -> str:
     Returns:
         Relative file path from project root (stored in DB, served by FastAPI).
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H%M%S%f")
 

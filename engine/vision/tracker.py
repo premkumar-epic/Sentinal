@@ -5,10 +5,12 @@ Track IDs are local to one camera — Re-ID handles cross-camera identity.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 
+from engine.config import settings
 from engine.vision.detector import Detection
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ class Track:
     track_id: int
     bbox: tuple[int, int, int, int]  # x1, y1, x2, y2
     confidence: float
+    global_id: Optional[str] = field(default=None)  # Set by Re-ID engine in pipeline
 
 
 class Tracker:
@@ -32,18 +35,19 @@ class Tracker:
 
     def __init__(self) -> None:
         try:
-            from boxmot import BoTSORT
-            self._tracker = BoTSORT(
+            from boxmot import BotSort
+            self._tracker = BotSort(
                 reid_weights=None,
-                device="cuda",
+                device=settings.tracker_device,
                 half=False,
+                with_reid=False,  # We use our own OSNet Re-ID engine
             )
             self._backend = "boxmot"
-            logger.info("Tracker initialised — backend=boxmot/BoT-SORT")
+            logger.info("Tracker initialised — backend=boxmot/BotSort")
         except Exception as e:
-            logger.warning("boxmot unavailable (%s) — falling back to ultralytics tracker", e)
+            logger.warning("boxmot unavailable (%s) — falling back to sequential ID tracker", e)
             self._tracker = None
-            self._backend = "ultralytics"
+            self._backend = "fallback"
 
     def update(self, detections: list[Detection], frame: np.ndarray) -> list[Track]:
         """

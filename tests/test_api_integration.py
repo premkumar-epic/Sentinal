@@ -16,6 +16,16 @@ from engine.config import settings
 BASE_URL = "http://test"
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+def disable_rate_limiting():
+    """Disable rate limiting for the test session."""
+    if hasattr(app.state, "limiter"):
+        app.state.limiter.enabled = False
+    yield
+    if hasattr(app.state, "limiter"):
+        app.state.limiter.enabled = True
+
+
 @pytest_asyncio.fixture
 async def client():
     """Async httpx client wired to the FastAPI ASGI app."""
@@ -23,13 +33,15 @@ async def client():
         yield ac
 
 
-@pytest_asyncio.fixture
-async def auth_headers(client: AsyncClient) -> dict:
-    """Login with default credentials and return Bearer auth headers."""
-    resp = await client.post(
-        "/api/auth/login",
-        data={"username": settings.auth_username, "password": settings.auth_password},
-    )
+@pytest_asyncio.fixture(scope="session")
+async def auth_headers() -> dict:
+    """Login once for the whole session to avoid rate limiting."""
+    # We need a temporary client here since the main client fixture is function scoped
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE_URL) as ac:
+        resp = await ac.post(
+            "/api/auth/login",
+            data={"username": settings.auth_username, "password": "sentinal"},
+        )
     assert resp.status_code == 200, f"Login failed: {resp.text}"
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -43,7 +55,7 @@ async def test_login_success(client: AsyncClient) -> None:
     """POST /api/auth/login with valid credentials returns 200 + access_token."""
     resp = await client.post(
         "/api/auth/login",
-        data={"username": settings.auth_username, "password": settings.auth_password},
+        data={"username": settings.auth_username, "password": "sentinal"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -79,7 +91,13 @@ async def test_stats_with_auth(client: AsyncClient, auth_headers: dict) -> None:
         "active_cameras": 0,
         "known_identities": 0,
     }
-    with patch("engine.storage.db.get_stats", new_callable=AsyncMock, return_value=mock_stats):
+    mock_detailed = {
+        "events_by_type": {},
+        "events_by_camera": {},
+        "top_zones": [],
+    }
+    with patch("engine.storage.db.get_stats", new_callable=AsyncMock, return_value=mock_stats), \
+         patch("engine.storage.db.get_detailed_stats", new_callable=AsyncMock, return_value=mock_detailed):
         resp = await client.get("/api/stats", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
@@ -88,7 +106,7 @@ async def test_stats_with_auth(client: AsyncClient, auth_headers: dict) -> None:
 
 async def test_events_with_auth(client: AsyncClient, auth_headers: dict) -> None:
     """GET /api/events with valid token returns 200."""
-    with patch("engine.storage.db.get_events", new_callable=AsyncMock, return_value=[]):
+    with patch("api.routers.events.get_events", new_callable=AsyncMock, return_value=[]):
         resp = await client.get("/api/events", headers=auth_headers)
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
@@ -111,7 +129,7 @@ async def test_zones_with_auth(client: AsyncClient, auth_headers: dict) -> None:
 
 async def test_identities_with_auth(client: AsyncClient, auth_headers: dict) -> None:
     """GET /api/identities with valid token returns 200."""
-    with patch("engine.storage.db.get_identities", new_callable=AsyncMock, return_value=[]):
+    with patch("api.routers.identities.get_identities", new_callable=AsyncMock, return_value=[]):
         resp = await client.get("/api/identities", headers=auth_headers)
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

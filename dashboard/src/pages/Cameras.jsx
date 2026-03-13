@@ -1,29 +1,34 @@
 import { useState, useEffect, useCallback } from 'react'
-import { API_BASE } from '../store/useStore'
+import { Video, Plus, RefreshCw, Trash2, Globe, Calendar, CheckCircle2, XCircle, Settings2, Edit2 } from 'lucide-react'
+import useStore from '../store/useStore'
 
 export default function Cameras() {
-  const [cameras, setCameras] = useState([])
+  const cameras = useStore((s) => s.cameras)
+  const fetchCamerasStore = useStore((s) => s.fetchCameras)
+  const addCamera = useStore((s) => s.addCamera)
+  const deleteCamera = useStore((s) => s.deleteCamera)
+  const patchCamera = useStore((s) => s.patchCamera)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Add form state
+  // Add/Edit form state
   const [form, setForm] = useState({ cam_id: '', url: '', label: '' })
+  const [editingId, setEditingId] = useState(null)
   const [addError, setAddError] = useState('')
   const [adding, setAdding] = useState(false)
 
   const fetchCameras = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/cameras`)
-      if (!res.ok) throw new Error(res.statusText)
-      setCameras(await res.json())
+      await fetchCamerasStore()
       setError('')
     } catch (err) {
       setError(`Failed to load cameras: ${err.message}`)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchCamerasStore])
 
   useEffect(() => {
     fetchCameras()
@@ -34,174 +39,294 @@ export default function Cameras() {
   const handleAdd = async (e) => {
     e.preventDefault()
     if (!form.cam_id.trim() || !form.url.trim()) {
-      setAddError('Camera ID and URL are required.')
+      setAddError('Primary identifiers (ID/URL) are mandatory.')
       return
     }
     setAdding(true)
     setAddError('')
     try {
-      const res = await fetch(`${API_BASE}/api/cameras`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (editingId) {
+        const success = await patchCamera(editingId, {
+          url: form.url.trim(),
+          label: form.label.trim() || undefined,
+        })
+        if (!success) {
+          setAddError('Failed to update camera configuration.')
+          return
+        }
+      } else {
+        const res = await addCamera({
           cam_id: form.cam_id.trim(),
           url: form.url.trim(),
           label: form.label.trim() || undefined,
-        }),
-      })
-      if (res.status === 409) {
-        setAddError(`Camera ID "${form.cam_id}" already exists.`)
-        return
+        })
+        
+        if (res.status === 409) {
+          setAddError(`System Conflict: ID "${form.cam_id}" is already registered.`)
+          return
+        }
+        
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          setAddError(body.detail || `Protocol Error ${res.status}`)
+          return
+        }
       }
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setAddError(body.detail || `Error ${res.status}`)
-        return
-      }
+      
       setForm({ cam_id: '', url: '', label: '' })
+      setEditingId(null)
       await fetchCameras()
     } catch (err) {
-      setAddError(`Request failed: ${err.message}`)
+      setAddError(`Link Failure: ${err.message}`)
     } finally {
       setAdding(false)
     }
   }
 
+  const startEdit = (cam) => {
+    setEditingId(cam.cam_id)
+    setForm({
+      cam_id: cam.cam_id,
+      url: cam.url,
+      label: cam.label || ''
+    })
+    setAddError('')
+    // Scroll to form if needed
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setForm({ cam_id: '', url: '', label: '' })
+    setAddError('')
+  }
+
   const handleDelete = async (cam_id) => {
-    if (!window.confirm(`Remove camera "${cam_id}"? This stops its pipeline.`)) return
+    if (!window.confirm(`PERMANENT ACTION: Deregister camera "${cam_id}" and terminate its AI pipeline?`)) return
     try {
-      const res = await fetch(`${API_BASE}/api/cameras/${cam_id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        alert(body.detail || `Failed to remove camera (${res.status})`)
+      const success = await deleteCamera(cam_id)
+      if (!success) {
+        alert(`De-registration failed. Protocol error.`)
         return
       }
       await fetchCameras()
     } catch (err) {
-      alert(`Request failed: ${err.message}`)
+      alert(`System fault during deletion: ${err.message}`)
     }
   }
 
   return (
     <div style={s.root}>
-      <h2 style={s.title}>Camera Management</h2>
-
-      {/* Add Camera form */}
-      <div style={s.card}>
-        <h3 style={s.cardTitle}>Add Camera</h3>
-        <form onSubmit={handleAdd} style={s.form}>
-          <label style={s.label}>Camera ID</label>
-          <input
-            style={s.input}
-            placeholder="e.g. cam_0"
-            value={form.cam_id}
-            onChange={(e) => setForm((f) => ({ ...f, cam_id: e.target.value }))}
-            disabled={adding}
-          />
-
-          <label style={s.label}>Stream URL</label>
-          <input
-            style={s.input}
-            placeholder="http://192.168.1.x:8080/video  or  rtsp://..."
-            value={form.url}
-            onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-            disabled={adding}
-          />
-
-          <label style={s.label}>Label (optional)</label>
-          <input
-            style={s.input}
-            placeholder="Front Door"
-            value={form.label}
-            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-            disabled={adding}
-          />
-
-          {addError && <p style={s.err}>{addError}</p>}
-
-          <button style={s.addBtn} type="submit" disabled={adding}>
-            {adding ? 'Adding…' : '+ Add Camera'}
-          </button>
-        </form>
-      </div>
-
-      {/* Camera list */}
-      <div style={s.card}>
-        <div style={s.cardHeaderRow}>
-          <h3 style={s.cardTitle}>Active Cameras</h3>
-          <button style={s.refreshBtn} onClick={fetchCameras} disabled={loading}>
-            {loading ? '…' : '↻ Refresh'}
-          </button>
+      <header style={s.header}>
+        <div>
+          <h2 style={s.title}>System Nodes</h2>
+          <p style={s.subtitle}>Register and monitor hardware capture endpoints</p>
         </div>
+        <button style={s.refreshBtn} onClick={fetchCameras} disabled={loading}>
+          <RefreshCw size={14} style={loading ? s.spin : {}} />
+          {loading ? 'SYNCHRONIZING...' : 'REFRESH STATUS'}
+        </button>
+      </header>
 
-        {error && <p style={s.err}>{error}</p>}
+      <div style={s.contentLayout}>
+        {/* Registration Terminal */}
+        <section style={s.formSection}>
+          <div style={s.card}>
+            <div style={s.cardHeader}>
+              {editingId ? <Edit2 size={18} color="var(--accent-primary)" /> : <Plus size={18} color="var(--accent-primary)" />}
+              <h3 style={s.cardTitle}>{editingId ? 'Update Node Config' : 'Register New Node'}</h3>
+            </div>
+            <form onSubmit={handleAdd} style={s.form}>
+              <div style={s.inputGroup}>
+                <label style={s.label}>NODE IDENTIFIER {editingId && '(IMMUTABLE)'}</label>
+                <input
+                  style={{...s.input, opacity: editingId ? 0.5 : 1}}
+                  placeholder="cam_alpha_01"
+                  value={form.cam_id}
+                  onChange={(e) => setForm((f) => ({ ...f, cam_id: e.target.value }))}
+                  disabled={adding || !!editingId}
+                />
+              </div>
 
-        {cameras.length === 0 ? (
-          <p style={s.empty}>
-            {loading ? 'Loading…' : 'No cameras added yet. Use the form above to add one.'}
-          </p>
-        ) : (
-          <div style={s.tableWrap}>
-            <table style={s.table}>
-              <thead>
-                <tr>
-                  {['Status', 'ID', 'Label', 'URL', 'Added', ''].map((h) => (
-                    <th key={h} style={s.th}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {cameras.map((cam) => (
-                  <tr key={cam.cam_id} style={s.tr}>
-                    <td style={s.td}>
-                      <span style={cam.alive ? s.dotGreen : s.dotRed} title={cam.alive ? 'Connected' : 'Disconnected'} />
-                    </td>
-                    <td style={s.td}><code style={s.code}>{cam.cam_id}</code></td>
-                    <td style={s.td}>{cam.label || '—'}</td>
-                    <td style={{ ...s.td, ...s.urlCell }}>{cam.url}</td>
-                    <td style={s.td}>
-                      {cam.added_at ? new Date(cam.added_at).toLocaleString() : '—'}
-                    </td>
-                    <td style={s.td}>
-                      <button
-                        style={s.deleteBtn}
-                        onClick={() => handleDelete(cam.cam_id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              <div style={s.inputGroup}>
+                <label style={s.label}>CAPTURE PROTOCOL / URL</label>
+                <input
+                  style={s.input}
+                  placeholder="rtsp://192.168.1.x:554/live"
+                  value={form.url}
+                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                  disabled={adding}
+                />
+              </div>
+
+              <div style={s.inputGroup}>
+                <label style={s.label}>FRIENDLY LABEL</label>
+                <input
+                  style={s.input}
+                  placeholder="Main Entrance"
+                  value={form.label}
+                  onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                  disabled={adding}
+                />
+              </div>
+
+              {addError && <p style={s.err}>{addError}</p>}
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button style={{...s.addBtn, flex: 1}} type="submit" disabled={adding}>
+                  {adding ? 'AUTHORIZING...' : (editingId ? 'SAVE CHANGES' : 'INITIALIZE REGISTRATION')}
+                </button>
+                {editingId && (
+                  <button style={s.cancelBtn} type="button" onClick={cancelEdit} disabled={adding}>
+                    CANCEL
+                  </button>
+                )}
+              </div>
+            </form>
           </div>
-        )}
+        </section>
+
+        {/* Node Registry */}
+        <section style={s.listSection}>
+          <div style={s.card}>
+            <div style={s.cardHeader}>
+              <Video size={18} color="var(--text-secondary)" />
+              <h3 style={s.cardTitle}>Node Registry</h3>
+            </div>
+
+            {error && <p style={s.err}>{error}</p>}
+
+            <div style={s.nodeList}>
+              {cameras.length === 0 ? (
+                <div style={s.emptyState}>
+                  <Settings2 size={32} style={{ marginBottom: '12px', opacity: 0.3 }} />
+                  NO NODES REGISTERED
+                </div>
+              ) : (
+                cameras.map((cam) => (
+                  <div key={cam.cam_id} style={s.nodeItem}>
+                    <div style={s.nodeInfo}>
+                      <div style={s.statusIcon}>
+                        {cam.alive ? (
+                          <CheckCircle2 size={20} color="var(--status-success)" />
+                        ) : (
+                          <XCircle size={20} color="var(--status-danger)" />
+                        )}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={s.nodeNameRow}>
+                          <span style={s.nodeLabel}>{cam.label || 'Unnamed Node'}</span>
+                          <span style={s.nodeId} className="mono">[{cam.cam_id}]</span>
+                        </div>
+                        <div style={s.nodeMeta}>
+                          <span style={s.metaItem}><Globe size={12} /> {cam.url}</span>
+                          <span style={s.metaItem}><Calendar size={12} /> {cam.added_at ? new Date(cam.added_at).toLocaleDateString() : 'Unknown'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={s.nodeActions}>
+                      <button 
+                        style={s.editBtn} 
+                        onClick={() => startEdit(cam)}
+                        title="Edit Configuration"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button 
+                        style={s.deleteBtn} 
+                        onClick={() => handleDelete(cam.cam_id)}
+                        title="Deregister"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   )
 }
 
 const s = {
-  root: { padding: '16px', background: '#0d0d0d', minHeight: '100vh', color: '#e0e0e0', fontFamily: 'monospace' },
-  title: { margin: '0 0 16px', color: '#00e5ff', fontSize: '1.1rem' },
-  card: { background: '#1a1a1a', border: '1px solid #333', borderRadius: '6px', padding: '16px', marginBottom: '16px' },
-  cardTitle: { margin: '0 0 12px', fontSize: '0.9rem', color: '#aaa' },
-  cardHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' },
-  form: { display: 'grid', gridTemplateColumns: '1fr', gap: '6px', maxWidth: '480px' },
-  label: { fontSize: '0.75rem', color: '#777', marginTop: '4px' },
-  input: { background: '#111', border: '1px solid #444', color: '#e0e0e0', padding: '6px 10px', borderRadius: '3px', fontSize: '0.85rem', outline: 'none' },
-  addBtn: { marginTop: '8px', padding: '7px 18px', background: '#00e5ff', color: '#000', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', width: 'fit-content' },
-  refreshBtn: { padding: '3px 10px', background: '#2a2a2a', color: '#aaa', border: '1px solid #444', borderRadius: '3px', cursor: 'pointer', fontSize: '0.75rem' },
-  err: { color: '#ff5252', fontSize: '0.8rem', margin: '4px 0' },
-  empty: { color: '#555', fontSize: '0.85rem', margin: '8px 0' },
-  tableWrap: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' },
-  th: { padding: '6px 8px', background: '#111', color: '#777', textAlign: 'left', borderBottom: '1px solid #333', whiteSpace: 'nowrap' },
-  tr: { borderBottom: '1px solid #222' },
-  td: { padding: '6px 8px', verticalAlign: 'middle' },
-  urlCell: { color: '#aaa', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  code: { background: '#111', padding: '1px 5px', borderRadius: '2px', color: '#00e5ff' },
-  dotGreen: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#00e676' },
-  dotRed: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#ff1744' },
-  deleteBtn: { padding: '3px 10px', background: '#2a0000', color: '#ff5252', border: '1px solid #ff1744', borderRadius: '3px', cursor: 'pointer', fontSize: '0.75rem' },
+  root: { display: 'flex', flexDirection: 'column', gap: '32px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { margin: 0, fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' },
+  subtitle: { margin: '6px 0 0', fontSize: '0.95rem', color: 'var(--text-sub)' },
+  
+  refreshBtn: { 
+    display: 'flex', alignItems: 'center', gap: '8px', 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    color: 'var(--text-main)', padding: '10px 16px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.2s',
+    boxShadow: 'var(--shadow-sm)'
+  },
+  spin: { animation: 'spin 2s linear infinite' },
+
+  contentLayout: { display: 'grid', gridTemplateColumns: '400px 1fr', gap: '32px' },
+  card: { 
+    background: 'var(--bg-surface)', border: '1px solid var(--border-base)', 
+    borderRadius: 'var(--radius-lg)', padding: '32px', 
+    boxShadow: 'var(--shadow-md)', height: '100%' 
+  },
+  cardHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '32px' },
+  cardTitle: { margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  
+  form: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  label: { fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.05em' },
+  input: { 
+    background: 'var(--bg-app)', border: '1px solid var(--border-base)', 
+    color: 'var(--text-main)', padding: '14px', borderRadius: 'var(--radius-md)', 
+    fontSize: '0.9rem', outline: 'none', transition: 'all 0.2s', 
+    fontFamily: 'inherit' 
+  },
+  addBtn: { 
+    background: 'var(--accent-primary)', 
+    color: '#fff', border: 'none', padding: '16px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, marginTop: '8px', 
+    boxShadow: '0 4px 12px var(--accent-soft)', transition: 'all 0.2s'
+  },
+  
+  nodeList: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  nodeItem: { 
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+    padding: '20px', background: 'var(--bg-app)', borderRadius: 'var(--radius-md)', 
+    border: '1px solid var(--border-base)', transition: 'all 0.2s',
+    cursor: 'default'
+  },
+  nodeInfo: { display: 'flex', alignItems: 'center', gap: '20px', flex: 1 },
+  statusIcon: { width: '48px', height: '48px', background: 'var(--bg-surface-raised)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-bright)' },
+  nodeNameRow: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' },
+  nodeLabel: { fontWeight: 700, color: 'var(--text-main)', fontSize: '1.05rem' },
+  nodeId: { fontSize: '0.75rem', color: 'var(--text-dim)' },
+  nodeMeta: { display: 'flex', gap: '20px', fontSize: '0.75rem', color: 'var(--text-sub)' },
+  metaItem: { display: 'flex', alignItems: 'center', gap: '6px' },
+  
+  nodeActions: { display: 'flex', gap: '8px' },
+  editBtn: { 
+    background: 'transparent', border: '1px solid transparent', 
+    color: 'var(--text-sub)', padding: '10px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', transition: 'all 0.2s' 
+  },
+  cancelBtn: {
+    background: 'transparent', border: '1px solid var(--border-base)',
+    color: 'var(--text-sub)', padding: '16px 24px', borderRadius: 'var(--radius-md)',
+    cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, marginTop: '8px', transition: 'all 0.2s'
+  },
+  deleteBtn: { 
+    background: 'transparent', border: '1px solid transparent', 
+    color: 'var(--text-dim)', padding: '10px', borderRadius: 'var(--radius-md)', 
+    cursor: 'pointer', transition: 'all 0.2s' 
+  },
+  err: { color: 'var(--status-danger)', fontSize: '0.8rem', fontWeight: 600, background: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.2)', padding: '12px', borderRadius: 'var(--radius-md)' },
+  emptyState: { 
+    height: '200px', display: 'flex', flexDirection: 'column', 
+    alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', 
+    fontSize: '0.85rem', fontWeight: 600, letterSpacing: '0.05em',
+    background: 'var(--glass-bg)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-bright)'
+  }
 }
