@@ -541,7 +541,7 @@ class CameraPipeline:
                             names[track.track_id] = name
                 except Exception as exc:
                     logger.debug("Identity error for track %d: %s", track.track_id, exc)
-        
+
         return global_ids, names
 
     def _process_single_track_identity(self, frame: np.ndarray, track, h: int, w: int, run_face: bool):
@@ -722,7 +722,7 @@ class CameraPipeline:
         self._cached_fps = fps
 
     def _annotate_and_push(
-        self, frame, tracks, weapon_dets, global_ids, names, 
+        self, frame, tracks, weapon_dets, global_ids, names,
         triggered_zone_ids, weapon_alert, module_results, fps
     ) -> None:
         """Draw annotations and push to MJPEG buffer."""

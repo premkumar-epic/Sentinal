@@ -172,11 +172,14 @@ class ReIDEngine:
         Retrieve existing global ID or assign a new one based on similarity.
         Now uses quality-aware updates and k-reciprocal re-ranking.
         """
-        if np.linalg.norm(embedding) < 1e-6:
-            return str(uuid.uuid4())
-
         with self._lock:
             key = (local_cam_id, local_track_id)
+            if np.linalg.norm(embedding) < 1e-6:
+                # Zero embedding — cache a stable ID so it doesn't change every frame
+                if key not in self.local_to_global:
+                    self.local_to_global[key] = str(uuid.uuid4())
+                return self.local_to_global[key]
+
             if key in self.local_to_global:
                 global_id = self.local_to_global[key]
                 self.update_embedding(global_id, embedding, quality)

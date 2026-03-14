@@ -156,6 +156,22 @@ class SQLiteBackend(DatabaseBackend):
             result.append(d)
         return result
 
+    async def get_event_by_id(self, event_id: str) -> Optional[Dict]:
+        async with self.conn.execute(
+            "SELECT id, alert_type, cam_id, zone_id, track_ids, global_ids, "
+            "name, confidence, timestamp, snapshot_path, metadata "
+            "FROM events WHERE id = ?",
+            (event_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["track_ids"] = json.loads(d["track_ids"]) if d["track_ids"] else []
+        d["global_ids"] = json.loads(d["global_ids"]) if d["global_ids"] else []
+        d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
+        return d
+
     async def get_identities(self) -> List[Dict]:
         query = "SELECT global_id, name, embedding, enrolled_at, last_seen, last_cam, sighting_count FROM identities"
         async with self.conn.execute(query) as cursor:
@@ -239,6 +255,50 @@ class SQLiteBackend(DatabaseBackend):
             "active_cameras": active_cameras,
             "known_identities": known_identities,
         }
+
+    async def get_zones(self, cam_id: Optional[str] = None) -> List[Dict]:
+        query = "SELECT zone_id, label, cam_id, polygon, color, active FROM zones"
+        params: list = []
+        if cam_id:
+            query += " WHERE cam_id = ?"
+            params.append(cam_id)
+        async with self.conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["polygon"] = json.loads(d["polygon"]) if isinstance(d["polygon"], str) else d["polygon"]
+            d["active"] = bool(d["active"])
+            result.append(d)
+        return result
+
+    async def get_zone_by_id(self, zone_id: str) -> Optional[Dict]:
+        async with self.conn.execute(
+            "SELECT zone_id, label, cam_id, polygon, color, active FROM zones WHERE zone_id = ?",
+            (zone_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["polygon"] = json.loads(d["polygon"]) if isinstance(d["polygon"], str) else d["polygon"]
+        d["active"] = bool(d["active"])
+        return d
+
+    async def upsert_zone(self, zone_id: str, label: str, cam_id: str, polygon: str, color: str, active: int) -> None:
+        async with self.lock:
+            await self.conn.execute(
+                """INSERT INTO zones (zone_id, label, cam_id, polygon, color, active) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(zone_id) DO UPDATE SET label=excluded.label, polygon=excluded.polygon, color=excluded.color, active=excluded.active""",
+                (zone_id, label, cam_id, polygon, color, active),
+            )
+            await self.conn.commit()
+
+    async def delete_zone(self, zone_id: str) -> bool:
+        async with self.lock:
+            cursor = await self.conn.execute("DELETE FROM zones WHERE zone_id = ?", (zone_id,))
+            await self.conn.commit()
+            return cursor.rowcount > 0
 
     async def get_detailed_stats(self) -> Dict:
         # Events by type

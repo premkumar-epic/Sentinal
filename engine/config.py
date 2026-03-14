@@ -91,15 +91,16 @@ class Settings(BaseSettings):
     @field_validator("jwt_secret_key")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:
-        """Raise error if default insecure key is used."""
+        """Auto-generate a secure random key if the default insecure key is used."""
         if v == "change-me-in-production":
-            # In a production-ready system, we should either raise an error
-            # or auto-generate a secure random one for this session only.
-            # We raise an error to force the user to be explicit in their .env.
-            raise ValueError(
-                "SECURITY ERROR: 'jwt_secret_key' must be changed from the default value in .env. "
-                "You can generate a new one with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+            import logging
+            generated = secrets.token_urlsafe(64)
+            logging.getLogger("engine.config").warning(
+                "JWT_SECRET_KEY is using the default value. Auto-generated a random session key. "
+                "Set JWT_SECRET_KEY in .env for persistent tokens across restarts. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
             )
+            return generated
         return v
 
     # Module defaults

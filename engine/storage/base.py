@@ -65,6 +65,11 @@ class DatabaseBackend(ABC):
         pass
 
     @abstractmethod
+    async def get_event_by_id(self, event_id: str) -> Optional[Dict]:
+        """Return a single event by ID, or None if not found."""
+        pass
+
+    @abstractmethod
     async def get_stats(self) -> Dict:
         """Return summary statistics."""
         pass
@@ -72,4 +77,24 @@ class DatabaseBackend(ABC):
     @abstractmethod
     async def get_detailed_stats(self) -> Dict:
         """Return detailed statistics (by type, camera, zone)."""
+        pass
+
+    @abstractmethod
+    async def get_zones(self, cam_id: Optional[str] = None) -> List[Dict]:
+        """Return all zones, optionally filtered by cam_id."""
+        pass
+
+    @abstractmethod
+    async def get_zone_by_id(self, zone_id: str) -> Optional[Dict]:
+        """Return a single zone by ID."""
+        pass
+
+    @abstractmethod
+    async def upsert_zone(self, zone_id: str, label: str, cam_id: str, polygon: str, color: str, active: int) -> None:
+        """Insert or update a zone."""
+        pass
+
+    @abstractmethod
+    async def delete_zone(self, zone_id: str) -> bool:
+        """Delete a zone. Returns True if deleted."""
         pass

@@ -80,6 +80,12 @@ class AlertManager:
         self._cooldowns: dict[str, float] = {}
         self._lock = threading.RLock()
 
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        """Get the event loop, preferring the stored one. Raises RuntimeError if unavailable."""
+        if self.loop is not None:
+            return self.loop
+        return asyncio.get_running_loop()
+
     def stop(self) -> None:
         """Shutdown the executor pool."""
         self._executor.shutdown(wait=True)
@@ -260,7 +266,7 @@ class AlertManager:
             # Step 2: Insert into database
             if self.db_insert_fn is not None:
                 try:
-                    loop = self.loop or asyncio.get_running_loop()
+                    loop = self._get_loop()
                     future = asyncio.run_coroutine_threadsafe(
                         self.db_insert_fn(alert), loop
                     )
@@ -272,7 +278,7 @@ class AlertManager:
             if self.ws_broadcaster is not None:
                 try:
                     payload = self._build_websocket_payload(alert, event)
-                    loop = self.loop or asyncio.get_running_loop()
+                    loop = self._get_loop()
                     future = asyncio.run_coroutine_threadsafe(
                         self.ws_broadcaster(payload), loop
                     )

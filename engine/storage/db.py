@@ -53,6 +53,11 @@ async def get_events(
     return await _get_backend().get_events(limit, offset, cam_id, alert_type, since)
 
 
+async def get_event_by_id(event_id: str) -> Optional[Dict]:
+    """Return a single event by ID, or None."""
+    return await _get_backend().get_event_by_id(event_id)
+
+
 async def get_identities() -> List[Dict]:
     """Return all known identities."""
     return await _get_backend().get_identities()
@@ -81,6 +86,26 @@ async def delete_identity(global_id: str) -> bool:
 async def delete_all_events() -> None:
     """Clear the events table."""
     await _get_backend().delete_all_events()
+
+
+async def get_zones(cam_id: Optional[str] = None) -> List[Dict]:
+    """Return all zones, optionally filtered by cam_id."""
+    return await _get_backend().get_zones(cam_id)
+
+
+async def get_zone_by_id(zone_id: str) -> Optional[Dict]:
+    """Return a single zone by ID."""
+    return await _get_backend().get_zone_by_id(zone_id)
+
+
+async def upsert_zone(zone_id: str, label: str, cam_id: str, polygon: str, color: str, active: int) -> None:
+    """Insert or update a zone."""
+    await _get_backend().upsert_zone(zone_id, label, cam_id, polygon, color, active)
+
+
+async def delete_zone(zone_id: str) -> bool:
+    """Delete a zone."""
+    return await _get_backend().delete_zone(zone_id)
 
 
 async def get_stats() -> Dict:

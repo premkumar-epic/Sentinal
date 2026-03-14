@@ -1,6 +1,7 @@
 """
 SENTINAL v2 — API Router: /api/zones
 Zone CRUD — all mutations write to DB and zones.json, then hot-reload ZoneManager.
+Uses the storage facade (supports both SQLite and PostgreSQL).
 """
 
 import json
@@ -8,17 +9,13 @@ import uuid
 import logging
 from typing import Optional
 
-import aiosqlite
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from engine.config import settings
+from engine.storage.db import get_zones, get_zone_by_id, upsert_zone, delete_zone as db_delete_zone
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/zones", tags=["zones"])
-
-# Derive DB path from settings (same pattern as db.py)
-_DB_PATH: str = settings.db_url.replace("sqlite:///", "")
 
 
 # ---------------------------------------------------------------------------
@@ -58,18 +55,6 @@ def _get_zone_manager():
     return ZoneManager.get_instance()
 
 
-def _row_to_response(row: dict) -> ZoneResponse:
-    polygon = json.loads(row["polygon"]) if isinstance(row["polygon"], str) else row["polygon"]
-    return ZoneResponse(
-        zone_id=row["zone_id"],
-        label=row["label"],
-        cam_id=row["cam_id"],
-        polygon=polygon,
-        color=row["color"],
-        active=bool(row["active"]),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -77,18 +62,8 @@ def _row_to_response(row: dict) -> ZoneResponse:
 @router.get("", response_model=list[ZoneResponse])
 async def list_zones(cam_id: Optional[str] = Query(default=None)):
     """Return all zones, optionally filtered by cam_id."""
-    query = "SELECT zone_id, label, cam_id, polygon, color, active FROM zones"
-    params: list = []
-    if cam_id:
-        query += " WHERE cam_id = ?"
-        params.append(cam_id)
-
-    async with aiosqlite.connect(_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-
-    return [_row_to_response(dict(row)) for row in rows]
+    rows = await get_zones(cam_id=cam_id)
+    return [ZoneResponse(**row) for row in rows]
 
 
 @router.post("", response_model=ZoneResponse, status_code=201)
@@ -97,12 +72,7 @@ async def create_zone(body: ZoneCreate):
     zone_id = str(uuid.uuid4())
     polygon_json = json.dumps(body.polygon)
 
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO zones (zone_id, label, cam_id, polygon, color, active) VALUES (?, ?, ?, ?, ?, 1)",
-            (zone_id, body.label, body.cam_id, polygon_json, body.color),
-        )
-        await db.commit()
+    await upsert_zone(zone_id, body.label, body.cam_id, polygon_json, body.color, 1)
 
     # Sync zones.json via ZoneManager
     from engine.zones.manager import Zone
@@ -130,30 +100,16 @@ async def create_zone(body: ZoneCreate):
 @router.put("/{zone_id}", response_model=ZoneResponse)
 async def update_zone(zone_id: str, body: ZoneUpdate):
     """Update an existing zone by zone_id. Returns 404 if not found."""
-    # Fetch existing
-    async with aiosqlite.connect(_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT zone_id, label, cam_id, polygon, color, active FROM zones WHERE zone_id = ?",
-            (zone_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-    if row is None:
+    existing = await get_zone_by_id(zone_id)
+    if existing is None:
         raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
 
-    existing = dict(row)
     new_label = body.label if body.label is not None else existing["label"]
-    new_polygon_raw = body.polygon if body.polygon is not None else json.loads(existing["polygon"])
+    new_polygon_raw = body.polygon if body.polygon is not None else existing["polygon"]
     new_color = body.color if body.color is not None else existing["color"]
-    new_active = int(body.active) if body.active is not None else existing["active"]
+    new_active = int(body.active) if body.active is not None else int(existing["active"])
 
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(
-            "UPDATE zones SET label=?, polygon=?, color=?, active=? WHERE zone_id=?",
-            (new_label, json.dumps(new_polygon_raw), new_color, new_active, zone_id),
-        )
-        await db.commit()
+    await upsert_zone(zone_id, new_label, existing["cam_id"], json.dumps(new_polygon_raw), new_color, new_active)
 
     # Sync zones.json
     from engine.zones.manager import Zone
@@ -181,13 +137,9 @@ async def update_zone(zone_id: str, body: ZoneUpdate):
 @router.delete("/{zone_id}", status_code=204)
 async def delete_zone(zone_id: str):
     """Delete a zone by zone_id. Returns 404 if not found."""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        async with db.execute("SELECT zone_id FROM zones WHERE zone_id = ?", (zone_id,)) as cursor:
-            row = await cursor.fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
-        await db.execute("DELETE FROM zones WHERE zone_id = ?", (zone_id,))
-        await db.commit()
+    deleted = await db_delete_zone(zone_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
 
     zm = _get_zone_manager()
     zm.remove_zone(zone_id)

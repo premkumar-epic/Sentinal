@@ -165,6 +165,22 @@ class PostgresBackend(DatabaseBackend):
             result.append(d)
         return result
 
+    async def get_event_by_id(self, event_id: str) -> Optional[Dict]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, alert_type, cam_id, zone_id, track_ids, global_ids, "
+                "name, confidence, timestamp, snapshot_path, metadata "
+                "FROM events WHERE id = $1",
+                event_id,
+            )
+        if row is None:
+            return None
+        d = dict(row)
+        d["track_ids"] = json.loads(d["track_ids"]) if d["track_ids"] else []
+        d["global_ids"] = json.loads(d["global_ids"]) if d["global_ids"] else []
+        d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
+        return d
+
     async def get_identities(self) -> List[Dict]:
         query = "SELECT global_id, name, embedding, enrolled_at, last_seen, last_cam, sighting_count FROM identities"
         async with self.pool.acquire() as conn:
@@ -252,6 +268,49 @@ class PostgresBackend(DatabaseBackend):
             "active_cameras": active_cameras,
             "known_identities": known_identities,
         }
+
+    async def get_zones(self, cam_id: Optional[str] = None) -> List[Dict]:
+        if cam_id:
+            query = "SELECT zone_id, label, cam_id, polygon, color, active FROM zones WHERE cam_id = $1"
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(query, cam_id)
+        else:
+            query = "SELECT zone_id, label, cam_id, polygon, color, active FROM zones"
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(query)
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["polygon"] = json.loads(d["polygon"]) if isinstance(d["polygon"], str) else d["polygon"]
+            d["active"] = bool(d["active"])
+            result.append(d)
+        return result
+
+    async def get_zone_by_id(self, zone_id: str) -> Optional[Dict]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT zone_id, label, cam_id, polygon, color, active FROM zones WHERE zone_id = $1",
+                zone_id,
+            )
+        if row is None:
+            return None
+        d = dict(row)
+        d["polygon"] = json.loads(d["polygon"]) if isinstance(d["polygon"], str) else d["polygon"]
+        d["active"] = bool(d["active"])
+        return d
+
+    async def upsert_zone(self, zone_id: str, label: str, cam_id: str, polygon: str, color: str, active: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO zones (zone_id, label, cam_id, polygon, color, active) VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (zone_id) DO UPDATE SET label=EXCLUDED.label, polygon=EXCLUDED.polygon, color=EXCLUDED.color, active=EXCLUDED.active""",
+                zone_id, label, cam_id, polygon, color, active,
+            )
+
+    async def delete_zone(self, zone_id: str) -> bool:
+        async with self.pool.acquire() as conn:
+            status = await conn.execute("DELETE FROM zones WHERE zone_id = $1", zone_id)
+        return "1" in status
 
     async def get_detailed_stats(self) -> Dict:
         async with self.pool.acquire() as conn:

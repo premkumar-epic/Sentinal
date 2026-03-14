@@ -250,7 +250,13 @@ class FaceRecognizer:
                 # 2. Persist to DB
                 from engine.storage.db import upsert_identity
                 nonlocal loop
-                _loop = loop or asyncio.get_running_loop()
+                if loop is None:
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        logger.warning("No event loop available for face enrollment DB persist")
+                        return
+                _loop = loop
                 future = asyncio.run_coroutine_threadsafe(
                     upsert_identity(global_id, name, embedding.tobytes()), _loop
                 )

@@ -81,38 +81,26 @@ async def clear_events():
 @router.get("/api/events/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str):
     """Return a single event by ID. 404 if not found."""
-    # get_events doesn't filter by id; fetch with limit=1 offset trick won't work —
-    # query directly via aiosqlite for a single row lookup.
-    import aiosqlite
-    import json
-    from engine.config import settings
-
-    db_path = settings.db_url.replace("sqlite:///", "")
-
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT id, alert_type, cam_id, zone_id, track_ids, global_ids, "
-            "name, confidence, timestamp, snapshot_path, metadata "
-            "FROM events WHERE id = ?",
-            (event_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-
+    from engine.storage.db import get_event_by_id
+    row = await get_event_by_id(event_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Event '{event_id}' not found.")
-
-    d = dict(row)
-    d["track_ids"] = json.loads(d["track_ids"]) if d["track_ids"] else []
-    d["global_ids"] = json.loads(d["global_ids"]) if d["global_ids"] else []
-    d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
-    return d
+    return row
 
 
 @snapshot_router.get("/api/snapshots/{path:path}")
 async def serve_snapshot(path: str, _user: str = Depends(get_current_user_from_query)):
     """Serve a snapshot JPEG file by relative path. Requires token in query."""
-    file_path = Path(path)
+    # Security: resolve path and ensure it stays within the snapshots directory
+    from engine.config import settings as _settings
+    snapshots_root = Path(_settings.snapshots_dir).resolve()
+    file_path = (snapshots_root / path).resolve()
+
+    # Prevent path traversal (e.g. ../../.env)
+    if not str(file_path).startswith(str(snapshots_root)):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Snapshot '{path}' not found.")
+        raise HTTPException(status_code=404, detail=f"Snapshot not found.")
+    if not file_path.suffix.lower() in (".jpg", ".jpeg", ".png"):
+        raise HTTPException(status_code=403, detail="Invalid file type")
     return FileResponse(str(file_path), media_type="image/jpeg")

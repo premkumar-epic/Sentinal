@@ -134,8 +134,9 @@ async def log_requests(request: Request, call_next):
     process_time = (time.time() - start_time) * 1000
 
     # Log: METHOD /PATH - STATUS - PROCESS_TIME ms
+    # Don't log query params — they may contain JWT tokens
     logger.info(
-        "%s %s - %d - %.2fms",
+        "%s %s - %d - %.1fms",
         request.method,
         request.url.path,
         response.status_code,
@@ -151,8 +152,8 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_origin_regex=settings.cors_allow_origin_regex,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 # ---------------------------------------------------------------------------
