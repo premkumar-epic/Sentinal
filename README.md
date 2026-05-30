@@ -1,4 +1,4 @@
-# SENTINALv1: Production AI Surveillance Sys
+# SENTINALv1: Production AI Surveillance System
 
 SENTINALv1 is a modular, zero-cloud AI video surveillance MVP designed for local, on-premise execution. It provides real-time YOLOv8n object detection, MobileNet Re-ID persistent tracking, mathematical zone-intrusion detection, and alert logging via a PostgreSQL database.
 
